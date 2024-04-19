@@ -1,0 +1,6 @@
+.vs/
+bin/
+*.ilk
+
+*.exe
+*.obj
