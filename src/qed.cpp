@@ -56,6 +56,68 @@ int vertex_buffer_capacity;
 
 View *active_view;
 
+void buffer_grow(Buffer *buffer, int64 gap_size) {
+    int64 size1 = buffer->gap_start;
+    int64 size2 = buffer->size - buffer->gap_end;
+
+    char *data = (char *)calloc(buffer->size + gap_size, 1);
+    memcpy(data, buffer->text, buffer->gap_start);
+    memset(data + size1, '_', gap_size);
+    memcpy(data + buffer->gap_start + gap_size, buffer->text + buffer->gap_end, buffer->size - buffer->gap_end);
+    free(buffer->text);
+    buffer->text = data;
+    buffer->gap_end += gap_size;
+    buffer->size += gap_size;
+}
+
+void buffer_ensure_gap(Buffer *buffer) {
+    if (buffer->gap_end - buffer->gap_start == 0) {
+        buffer_grow(buffer, 1024);
+    }
+}
+
+void buffer_shift_gap(Buffer *buffer, int64 new_gap) {
+    char *temp = (char *)malloc(buffer->size);
+
+    int64 gap_start = buffer->gap_start;
+    int64 gap_end = buffer->gap_end;
+    int64 gap_size = gap_end - gap_start;
+    int64 size = buffer->size;
+    
+    if (new_gap > gap_start) {
+        memcpy(temp, buffer->text, new_gap);
+        memcpy(temp + gap_start, buffer->text + gap_end, new_gap - gap_start);
+        memcpy(temp + new_gap + gap_size, buffer->text + new_gap + gap_size, size - (new_gap + gap_size));
+    } else {
+        memcpy(temp, buffer->text, new_gap);
+        memcpy(temp + new_gap + gap_size, buffer->text + new_gap, gap_start - new_gap);
+        memcpy(temp + new_gap + gap_size + (gap_start - new_gap), buffer->text + gap_end, size - gap_end);
+    }
+
+    free(buffer->text);
+    buffer->text = temp;
+    buffer->gap_start = new_gap;
+    buffer->gap_end = new_gap + gap_size;
+}
+
+void buffer_insert(Buffer *buffer, int64 cursor, char c) {
+    buffer_ensure_gap(buffer);
+
+    if (buffer->gap_start != cursor) {
+        buffer_shift_gap(buffer, cursor);
+    }
+
+    buffer->text[cursor] = c;
+    buffer->gap_start++;
+}
+
+
+void self_insert(View *view, char c) {
+    buffer_insert(view->buffer, view->cursor, c);
+
+    view->cursor++;
+}
+
 void upload_constants(ID3D11Buffer *constant_buffer, void *constants, int32 constants_size) {
     D3D11_MAPPED_SUBRESOURCE res{};
     if (d3d11_context->Map(constant_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &res) == S_OK) {
@@ -220,6 +282,7 @@ LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) 
         printf("WM_KEYDOWN\n");
         break;
     }
+
     case WM_CHAR:
     {
         printf("WM_CHAR\n");
@@ -227,7 +290,10 @@ LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) 
         uint8 c = (uint8)vk;
         if (c == '\r') {
             c = '\n';
-        } else if (c > 127) {
+        }
+
+        if (c < 127) {
+            self_insert(active_view, (char)c);
         }
         break;
     }
@@ -411,9 +477,9 @@ Buffer *make_buffer_from_file(const char *file_name) {
     Buffer *buffer = new Buffer();
     buffer->file_name = file_name;
     buffer->text = (char *)file.data;
-    buffer->gap = 0;
+    buffer->gap_start = 0;
     buffer->gap_end = 0;
-    buffer->end = file.count;
+    buffer->size = file.count;
     buffer->file_handle = file.handle;
     FILETIME file_time;
     GetFileTime(file.handle, NULL, NULL, &file_time);
@@ -473,9 +539,15 @@ void draw_string(Face *face, char *string, int64 count, v4 text_color) {
 
 void draw_view(View *view) {
     v4 bg_color = V4(0.12f, 0.12f, 0.12f, 1.0f);
-    v4 text_color = V4(0.59, 0.46, 0.67, 1.0f);
+    v4 text_color = V4(0.59f, 0.46f, 0.67f, 1.0f);
     draw_rectangle(view->rect, bg_color);
-    draw_string(view->face, view->buffer->text, view->buffer->end, text_color);
+
+    int64 count = view->buffer->size - (view->buffer->gap_end - view->buffer->gap_start);
+    char *string = (char *)malloc(count);
+    memcpy(string, view->buffer->text, view->buffer->gap_start);
+    memcpy(string + view->buffer->gap_start, view->buffer->text + view->buffer->gap_end, view->buffer->size - view->buffer->gap_end);
+
+    draw_string(view->face, string, count, text_color);
 }
 
 int main(int argc, char **argv) {
@@ -596,7 +668,7 @@ int main(int argc, char **argv) {
     };
     Shader *simple_shader = make_shader("simple.hlsl", "vs_main", "ps_main", simple_layout, ARRAYSIZE(simple_layout));
 
-    Face *face = load_font_face("fonts/Inconsolata.ttf", 30);
+    Face *face = load_font_face("fonts/Inconsolata.ttf", 18);
 
     ID3D11Buffer *simple_constant_buffer = make_constant_buffer(sizeof(Simple_Constants));
 

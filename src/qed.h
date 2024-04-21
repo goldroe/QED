@@ -104,11 +104,11 @@ struct Rect {
 
 struct Buffer {
     const char *file_name;
-    char *text;
 
-    int64 gap;
+    char *text;
+    int64 gap_start;
     int64 gap_end;
-    int64 end;
+    int64 size;
 
     HANDLE file_handle;
     int64 last_write_time;

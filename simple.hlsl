@@ -28,5 +28,5 @@ VS_OUT vs_main(VS_IN vin) {
 
 float4 ps_main(VS_OUT pin) : SV_TARGET {
     float4 diffuse = diffuse_tex.Sample(diffuse_sampler, pin.uv);
-    return diffuse.r * pin.color;
+    return float4(pin.color.rgb, diffuse.r);
 }
