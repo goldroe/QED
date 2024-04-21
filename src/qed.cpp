@@ -50,6 +50,12 @@ ID3D11Device *d3d11_device = nullptr;
 ID3D11DeviceContext *d3d11_context = nullptr;
 ID3D11RenderTargetView *d3d11_render_target = nullptr;
 
+Array<Vertex> vertices;
+ID3D11Buffer *vertex_buffer;
+int vertex_buffer_capacity;
+
+View *active_view;
+
 void upload_constants(ID3D11Buffer *constant_buffer, void *constants, int32 constants_size) {
     D3D11_MAPPED_SUBRESOURCE res{};
     if (d3d11_context->Map(constant_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &res) == S_OK) {
@@ -70,13 +76,13 @@ void update_vertex_buffer(ID3D11Buffer *vertex_buffer, void *vertex_data, int32 
     }
 }
 
-ID3D11Buffer *make_vertex_buffer(void *vertex_data, int32 elem_count, int32 size, bool dynamic = false) {
+ID3D11Buffer *make_vertex_buffer(void *vertex_data, int32 count, int32 size) {
     ID3D11Buffer *vertex_buffer = nullptr;
     D3D11_BUFFER_DESC desc{};
-    desc.ByteWidth = elem_count * size;
-    desc.Usage = dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_DEFAULT;
+    desc.ByteWidth = count * size;
+    desc.Usage = D3D11_USAGE_DYNAMIC;
     desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    desc.CPUAccessFlags = dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     D3D11_SUBRESOURCE_DATA data{};
     data.pSysMem = vertex_data;
     if (d3d11_device->CreateBuffer(&desc, &data, &vertex_buffer) != S_OK) {
@@ -98,7 +104,7 @@ ID3D11Buffer *make_constant_buffer(unsigned int size) {
     return constant_buffer;
 }
 
-char *read_entire_file(const char *file_name) {
+char *read_file_string(const char *file_name) {
     char *result = NULL;
     HANDLE file_handle = CreateFileA((LPCSTR)file_name, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file_handle != INVALID_HANDLE_VALUE) {
@@ -125,12 +131,39 @@ char *read_entire_file(const char *file_name) {
     return result;
 }
 
+Read_File read_entire_file(const char *file_name) {
+    Read_File result{};
+    HANDLE file_handle = CreateFileA((LPCSTR)file_name, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file_handle != INVALID_HANDLE_VALUE) {
+        uint64 bytes_to_read;
+        if (GetFileSizeEx(file_handle, (PLARGE_INTEGER)&bytes_to_read)) {
+            assert(bytes_to_read <= UINT32_MAX);
+            result.data = (char *)malloc(bytes_to_read);
+            DWORD bytes_read;
+            if (ReadFile(file_handle, result.data, (DWORD)bytes_to_read, &bytes_read, NULL) && (DWORD)bytes_to_read ==  bytes_read) {
+                result.count = bytes_read;
+                result.handle = file_handle;
+            } else {
+                // TODO: error handling
+                printf("ReadFile: error reading file, %s!\n", file_name);
+            }
+       } else {
+            // TODO: error handling
+            printf("GetFileSize: error getting size of file: %s!\n", file_name);
+       }
+    } else {
+        // TODO: error handling
+        printf("CreateFile: error opening file: %s!\n", file_name);
+    }
+    return result;
+}
+
 Shader *make_shader(const char *file_name, const char *vs_entry, const char *ps_entry, D3D11_INPUT_ELEMENT_DESC *items, int item_count) {
     Shader *shader = new Shader();
     //shader->name = copy_string(path_strip_file_name(file_name));
     printf("Compiling shader '%s'... ", file_name);
 
-    char *source = read_entire_file(file_name);
+    char *source = read_file_string(file_name);
     ID3DBlob *vertex_blob, *pixel_blob, *vertex_error_blob, *pixel_error_blob;
     UINT flags = 0;
     #if _DEBUG
@@ -174,42 +207,76 @@ void win32_get_window_size(HWND hwnd, int *width, int *height) {
     GetClientRect(hwnd, &rect);
     if (*width) *width = rect.right - rect.left;
     if (*height) *height = rect.bottom - rect.top;
-    
 }
 
 LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
     LRESULT result = 0;
     switch (Msg) {
+    case WM_KEYDOWN:
+    case WM_KEYUP:
+    {
+        bool key_down = ((uint32)lParam >> 31) == 0;
+        uint64 vk = wParam;
+        printf("WM_KEYDOWN\n");
+        break;
+    }
+    case WM_CHAR:
+    {
+        printf("WM_CHAR\n");
+        uint16 vk = wParam & 0x0000ffff;
+        uint8 c = (uint8)vk;
+        if (c == '\r') {
+            c = '\n';
+        } else if (c > 127) {
+        }
+        break;
+    }
+
     case WM_SIZE:
     {
-#if 0
-        IDXGISwapChain *swapchain = graphics_context->swap_chain;
-        ID3D11RenderTargetView *render_target = graphics_context->render_target;
+        UINT width = LOWORD(lParam);
+        UINT height = HIWORD(lParam);
         // NOTE: Resize render target view
-        if (swapchain) {
-            graphics_context->d3d_context->OMSetRenderTargets(0, 0, 0);
+        if (d3d11_swap_chain) {
+            d3d11_context->OMSetRenderTargets(0, 0, 0);
 
             // Release all outstanding references to the swap chain's buffers.
-            render_target->Release();
+            d3d11_render_target->Release();
 
             // Preserve the existing buffer count and format.
             // Automatically choose the width and height to match the client rect for HWNDs.
-            HRESULT hr = swapchain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-                                            
-            // Perform error handling here!
+            HRESULT hr = d3d11_swap_chain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
 
             // Get buffer and create a render-target-view.
-            ID3D11Texture2D* buffer;
-            hr = swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**) &buffer);
-            // Perform error handling here!
+            ID3D11Texture2D *backbuffer;
+            hr = d3d11_swap_chain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void **)&backbuffer);
 
-            hr = graphics_context->d3d_device->CreateRenderTargetView(buffer, NULL, &render_target);
-            // Perform error handling here!
-            buffer->Release();
+            hr = d3d11_device->CreateRenderTargetView(backbuffer, NULL, &d3d11_render_target);
 
-            graphics_context->d3d_context->OMSetRenderTargets(1, &render_target, NULL);
+            backbuffer->Release();
+
+            ID3D11DepthStencilView *depth_stencil_view = nullptr;
+            // DEPTH STENCIL BUFFER
+            {
+                D3D11_TEXTURE2D_DESC desc{};
+                desc.Width = width;
+                desc.Height = height;
+                desc.MipLevels = 1;
+                desc.ArraySize = 1;
+                desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+                desc.SampleDesc.Count = 1;
+                desc.SampleDesc.Quality = 0;
+                desc.Usage = D3D11_USAGE_DEFAULT;
+                desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+                desc.CPUAccessFlags = 0;
+                desc.MiscFlags = 0;
+
+                ID3D11Texture2D *depth_stencil_buffer = nullptr;
+                hr = d3d11_device->CreateTexture2D(&desc, NULL, &depth_stencil_buffer);
+                hr = d3d11_device->CreateDepthStencilView(depth_stencil_buffer, NULL, &depth_stencil_view);
+            }
+            d3d11_context->OMSetRenderTargets(1, &d3d11_render_target, depth_stencil_view);
         }
-    #endif 
         break;
     }
 
@@ -338,9 +405,82 @@ Face *load_font_face(const char *font_name, int font_height) {
     return face;
 }
 
+Buffer *make_buffer_from_file(const char *file_name) {
+    Read_File file = read_entire_file(file_name);
+    assert(file.data);
+    Buffer *buffer = new Buffer();
+    buffer->file_name = file_name;
+    buffer->text = (char *)file.data;
+    buffer->gap = 0;
+    buffer->gap_end = 0;
+    buffer->end = file.count;
+    buffer->file_handle = file.handle;
+    FILETIME file_time;
+    GetFileTime(file.handle, NULL, NULL, &file_time);
+    buffer->last_write_time = (((uint64)file_time.dwHighDateTime << 32) | (file_time.dwLowDateTime));
+    return buffer;
+}
+
+void draw_vertex(float x, float y, float u, float v, v4 color) {
+    Vertex vertex;
+    vertex.position.x = x;
+    vertex.position.y = y;
+    vertex.uv.x = u;
+    vertex.uv.y = v;
+    vertex.color = color;
+    vertices.push(vertex);
+}
+
+void draw_rectangle(Rect rect, v4 color) {
+    draw_vertex(rect.x0, rect.y0, 0.0f, 0.0f, color);
+    draw_vertex(rect.x0, rect.y1, 0.0f, 0.0f, color);
+    draw_vertex(rect.x1, rect.y1, 0.0f, 0.0f, color);
+    draw_vertex(rect.x0, rect.y0, 0.0f, 0.0f, color);
+    draw_vertex(rect.x1, rect.y1, 0.0f, 0.0f, color);
+    draw_vertex(rect.x1, rect.y0, 0.0f, 0.0f, color);
+}
+
+void draw_string(Face *face, char *string, int64 count, v4 text_color) {
+    v2 cursor = V2(0.0f, 0.0f);
+    for (int64 i = 0; i < count; i++) {
+        char c = string[i];
+        if (c == '\n') {
+            cursor.x = 0.0f;
+            cursor.y += face->glyph_height;
+            continue;
+        }
+        Glyph *glyph = face->glyphs + c;
+        float x0 = cursor.x + glyph->bl;
+        float x1 = x0 + glyph->bx;
+        float y0 = cursor.y - glyph->bt + face->ascend;
+        float y1 = y0 + glyph->by; 
+
+        float tw = glyph->bx / (float)face->width;
+        float th = glyph->by / (float)face->height;
+        float tx = glyph->to;
+        float ty = 0.0f;
+
+        draw_vertex(x0, y1, tx,      ty + th, text_color);
+        draw_vertex(x0, y0, tx,      ty,      text_color);
+        draw_vertex(x1, y0, tx + tw, ty,      text_color);
+        draw_vertex(x0, y1, tx,      ty + th, text_color);
+        draw_vertex(x1, y0, tx + tw, ty,      text_color);
+        draw_vertex(x1, y1, tx + tw, ty + th, text_color);
+
+        cursor.x += glyph->ax;
+    }
+}
+
+void draw_view(View *view) {
+    v4 bg_color = V4(0.12f, 0.12f, 0.12f, 1.0f);
+    v4 text_color = V4(0.59, 0.46, 0.67, 1.0f);
+    draw_rectangle(view->rect, bg_color);
+    draw_string(view->face, view->buffer->text, view->buffer->end, text_color);
+}
+
 int main(int argc, char **argv) {
     UINT desired_scheduler_ms = 1;
-    timeBeginPeriod(desired_scheduler_ms);
+    // timeBeginPeriod(desired_scheduler_ms);
 
 #define CLASSNAME "qed_hwnd_class"
     HINSTANCE hinstance = GetModuleHandle(NULL);
@@ -355,18 +495,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "RegisterClassA failed, err:%d\n", GetLastError());
     }
 
-    HWND window = 0;
-    {
-        RECT rc = {0, 0, WIDTH, HEIGHT};
-        if (AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE)) {
-            window = CreateWindowA(CLASSNAME, "Qed", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, hinstance, NULL);
-        } else {
-            fprintf(stderr, "AdjustWindowRect failed, err:%d\n", GetLastError());
-        }
-        if (!window) {
-            fprintf(stderr, "CreateWindowA failed, err:%d\n", GetLastError());
-        }
-    }
+    HWND window = CreateWindowA(CLASSNAME, "Qed", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, WIDTH, HEIGHT, NULL, NULL, hinstance, NULL);
 
     HRESULT hr = S_OK;
 
@@ -400,25 +529,10 @@ int main(int argc, char **argv) {
     hr = d3d11_device->CreateRenderTargetView(backbuffer, NULL, &d3d11_render_target);
     backbuffer->Release();
 
-    ID3D11DepthStencilView *depth_stencil_view = nullptr;
-    // DEPTH STENCIL BUFFER
     {
-        D3D11_TEXTURE2D_DESC desc{};
-        desc.Width = WIDTH;
-        desc.Height = HEIGHT;
-        desc.MipLevels = 1;
-        desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        desc.SampleDesc.Count = 1;
-        desc.SampleDesc.Quality = 0;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-        desc.CPUAccessFlags = 0;
-        desc.MiscFlags = 0;
-
-        ID3D11Texture2D *depth_stencil_buffer = nullptr;
-        hr = d3d11_device->CreateTexture2D(&desc, NULL, &depth_stencil_buffer);
-        hr = d3d11_device->CreateDepthStencilView(depth_stencil_buffer, NULL, &depth_stencil_view);
+        RECT rc = {0, 0, WIDTH, HEIGHT};
+        AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+        SetWindowPos(window, HWND_NOTOPMOST, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOMOVE|SWP_NOZORDER);
     }
 
     // DEPTH-STENCIL STATE
@@ -482,48 +596,18 @@ int main(int argc, char **argv) {
     };
     Shader *simple_shader = make_shader("simple.hlsl", "vs_main", "ps_main", simple_layout, ARRAYSIZE(simple_layout));
 
-    Face *face = load_font_face("fonts/Inconsolata.ttf", 40);
-    
-    const char *text = "This is some sample text.";
-    Array<Vertex> vertices;
+    Face *face = load_font_face("fonts/Inconsolata.ttf", 30);
 
-    v2 cursor = V2(0.0f, 0.0f);
-    char c;
-    while (c = *text++) {
-        Glyph *glyph = face->glyphs + c;
-        float x0 = cursor.x + glyph->bl;
-        float x1 = x0 + glyph->bx;
-        float y0 = cursor.y - glyph->bt + face->ascend;
-        float y1 = y0 + glyph->by; 
-
-        float tw = glyph->bx / (float)face->width;
-        float th = glyph->by / (float)face->height;
-        float tx = glyph->to;
-        float ty = 0.0f;
-
-        Vertex v[6];
-        v[0] = { x0, y1, tx, ty + th,      V4(1, 1, 1, 1) };
-        v[1] = { x0, y0, tx, ty,           V4(1, 1, 1, 1) };
-        v[2] = { x1, y0, tx + tw, ty,      V4(1, 1, 1, 1) };
-        v[3] = v[0];
-        v[4] = v[2];
-        v[5] = { x1, y1, tx + tw, ty + th, V4(1, 1, 1, 1) };
-
-        vertices.push(v[0]);
-        vertices.push(v[1]);
-        vertices.push(v[2]);
-        vertices.push(v[3]);
-        vertices.push(v[4]);
-        vertices.push(v[5]);
-
-        cursor.x += glyph->ax;
-    }
-
-    ID3D11Buffer *vertex_buffer = make_vertex_buffer(vertices.data, (int32)vertices.count, sizeof(Vertex));
     ID3D11Buffer *simple_constant_buffer = make_constant_buffer(sizeof(Simple_Constants));
 
     Simple_Constants simple_constants{};
 
+    active_view = new View();
+    active_view->rect = { 0.0f, 0.0f, (float)WIDTH, (float)HEIGHT };
+    active_view->buffer = make_buffer_from_file("simple.hlsl");
+    active_view->cursor = 0;
+    active_view->face = face;
+    
     while (!window_should_close) {
         MSG message;
         while (PeekMessageA(&message, NULL, 0, 0, PM_REMOVE)) {
@@ -538,16 +622,35 @@ int main(int argc, char **argv) {
         win32_get_window_size(window, &width, &height);
         v2 render_dim = V2((float)width, (float)height);
 
+        active_view->rect = { 0.0f, 0.0f, render_dim.x, render_dim.y };
+
+        vertices.reset_count();
+
+        draw_view(active_view);
+
+        if (!vertex_buffer && vertices.count > 0 || vertex_buffer_capacity < vertices.count) {
+            if (vertex_buffer) {
+                vertex_buffer->Release();
+                vertex_buffer = nullptr;
+            }
+            vertex_buffer_capacity = (int)vertices.capacity;
+            vertex_buffer = make_vertex_buffer(vertices.data, vertex_buffer_capacity, sizeof(Vertex));
+        }
+
+        if (vertices.count > 0) {
+            update_vertex_buffer(vertex_buffer, vertices.data, (int)vertices.count * sizeof(Vertex));
+        }
+
+
         m4 projection = ortho_rh_zo(0.0f, render_dim.x, render_dim.y, 0.0f, 0.0f, 1.0f);
 
         float bg_color[4] = {0, 0, 0, 1};
         d3d11_context->ClearRenderTargetView(d3d11_render_target, bg_color);
-        d3d11_context->OMSetRenderTargets(1, &d3d11_render_target, depth_stencil_view);
 
         D3D11_VIEWPORT viewport{};
         viewport.TopLeftX = viewport.TopLeftY = 0;
-        viewport.Width = WIDTH;
-        viewport.Height = HEIGHT;
+        viewport.Width = render_dim.x;
+        viewport.Height = render_dim.y;
         viewport.MinDepth = 0.0f;
         viewport.MaxDepth = 1.0f;
 
