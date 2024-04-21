@@ -1,3 +1,6 @@
+#ifndef ARRAY_H
+#define ARRAY_H
+
 #include <stdlib.h>
 #include <initializer_list>
 #include <assert.h>
@@ -77,10 +80,9 @@ public:
     }
 
     Array(Array<T> &array) {
-        Array<T> copy{};
-        copy.reserve(array.count);
-        copy.count = array.count;
-        memcpy(copy.data, array.data, array.count * sizeof(T));
+        data = array.data;
+        count = array.count;
+        capacity = array.capacity;
     }
 
     void swap(Array<T> &x) {
@@ -100,3 +102,6 @@ void Array<T>::reserve(size_t num_elements) {
     data = (T *)malloc(num_elements * sizeof(T));
     capacity = num_elements;
 }
+
+
+#endif // ARRAY_H
