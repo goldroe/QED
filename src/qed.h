@@ -1,74 +1,9 @@
 #pragma once
 
 #include "simple_math.h"
-
-enum Keycode {
-    Key_Begin = 0,
-    
-    Key_Enter  = 0x0D,
-    Key_Shift  = 0x10,
-    Key_Ctrl   = 0x11,
-    Key_Alt    = 0x12,
-
-    Key_Escape = 0x1B,
-
-    Key_Left = 0x25,
-    Key_Up,
-    Key_Right,
-    Key_Down,
-
-    Key_0 = 0x30,
-    Key_1,
-    Key_2,
-    Key_3,
-    Key_4,
-    Key_5,
-    Key_6,
-    Key_7,
-    Key_8,
-    Key_9,
-
-    Key_A = 0x41,
-    Key_B,
-    Key_C,
-    Key_D,
-    Key_E,
-    Key_F,
-    Key_G,
-    Key_H,
-    Key_I,
-    Key_J,
-    Key_K,
-    Key_L,
-    Key_M,
-    Key_N,
-    Key_O,
-    Key_P,
-    Key_Q,
-    Key_R,
-    Key_S,
-    Key_T,
-    Key_U,
-    Key_V,
-    Key_W,
-    Key_X,
-    Key_Y,
-    Key_Z,
-
-    Key_Last,
-};
-
-struct Read_File {
-    void *data;
-    int64 count;
-    HANDLE handle;
-};
-
-struct Vertex {
-    v2 position;
-    v2 uv;
-    v4 color;
-};
+#include "array.h"
+#include "types.h"
+#include "buffer.h" 
 
 struct Glyph {
     float ax;
@@ -92,56 +27,22 @@ struct Face {
     int bbox_height;
     float glyph_width;
     float glyph_height;
-    ID3D11ShaderResourceView *texture;
-};
 
-struct Rect {
-    float x0;
-    float y0;
-    float x1;
-    float y1;
-};
-
-struct Buffer {
-    const char *file_name;
-
-    char *text;
-    int64 gap_start;
-    int64 gap_end;
-    int64 size;
-
-    HANDLE file_handle;
-    int64 last_write_time;
+    void *texture;
 };
 
 struct View {
     Rect rect;
 
     Buffer *buffer;
-    int64 cursor;
+
+    Cursor cursor;
 
     Face *face;
 };
 
-struct Shader {
-    char *name;
-    ID3D11InputLayout *input_layout;
-    ID3D11VertexShader *vertex_shader;
-    ID3D11PixelShader *pixel_shader;
-};
 
-struct Simple_Constants {
-    m4 transform;
-};
-
-enum Input_Event_Type {
-    INPUT_EVENT_NONE,
-    INPUT_EVENT_RESIZE,
-    INPUT_EVENT_KEY_STROKE,
-    INPUT_EVENT_KEY_RELEASE,
-    INPUT_EVENT_MOUSEMOVE,
-    INPUT_EVENT_MOUSECLICK,
-};
+void draw_view(View *view);
 
 struct Input {
     bool capture_cursor;
@@ -150,60 +51,119 @@ struct Input {
     int delta_x, delta_y;
 };
 
-struct Input_Event {
-    Input_Event_Type type;
+enum System_Event_Type {
+    SYSTEM_EVENT_NONE,
+    SYSTEM_EVENT_WINDOW_SIZE,
+    SYSTEM_EVENT_KEY_STROKE,
+    SYSTEM_EVENT_KEY_RELEASE,
+    SYSTEM_EVENT_MOUSEMOVE,
+    SYSTEM_EVENT_MOUSECLICK,
 };
 
-struct Key_Event : Input_Event {
-    Keycode key;
-    int modifiers;
+struct System_Event {
+    System_Event_Type type;
 };
 
-struct Text_Event : Input_Event {
+struct Window_Size_Event : System_Event {
+    Window_Size_Event() { type = SYSTEM_EVENT_WINDOW_SIZE; }
+    int width;
+    int height;
+};
+
+struct Text_Event : System_Event {
     char *text;
     int64 count;
 };
 
-#define KEYCODE_NAMES() \
-    KEY(Key_A, "A"), \
-    KEY(Key_B, "B"), \
-    KEY(Key_C, "C"), \
-    KEY(Key_D, "D"), \
-    KEY(Key_E, "E"), \
-    KEY(Key_F, "F"), \
-    KEY(Key_G, "G"), \
-    KEY(Key_H, "H"), \
-    KEY(Key_I, "I"), \
-    KEY(Key_J, "J"), \
-    KEY(Key_K, "K"), \
-    KEY(Key_L, "L"), \
-    KEY(Key_M, "M"), \
-    KEY(Key_N, "N"), \
-    KEY(Key_O, "O"), \
-    KEY(Key_P, "P"), \
-    KEY(Key_Q, "Q"), \
-    KEY(Key_R, "R"), \
-    KEY(Key_S, "S"), \
-    KEY(Key_T, "T"), \
-    KEY(Key_U, "U"), \
-    KEY(Key_V, "V"), \
-    KEY(Key_W, "W"), \
-    KEY(Key_X, "X"), \
-    KEY(Key_Y, "Y"), \
-    KEY(Key_Z, "Z"), \
-    \
-    KEY(Key_0, "0"), \
-    KEY(Key_1, "1"), \
-    KEY(Key_2, "2"), \
-    KEY(Key_3, "3"), \
-    KEY(Key_4, "4"), \
-    KEY(Key_5, "5"), \
-    KEY(Key_6, "6"), \
-    KEY(Key_7, "7"), \
-    KEY(Key_8, "8"), \
-    KEY(Key_9, "9"), \
-    \
-    KEY(Key_Space, " "), \
-    KEY(Key_Comma, ","), \
-    KEY(Key_Period, "."), \
-    KEY(Key_Asterisk, "*"), \
+#define KEYMOD_CONTROL (1 << 11)
+#define KEYMOD_ALT     (1 << 10)
+#define KEYMOD_SHIFT   (1 << 9)
+
+#define MAX_KEY_COUNT (1 << (8 + 3))
+typedef uint16 Key;
+
+struct Key_Map {
+    Key keys[MAX_KEY_COUNT];
+};
+
+enum Key_Code {
+    KEY_A,
+    KEY_B,
+    KEY_C,
+    KEY_D,
+    KEY_E,
+    KEY_F,
+    KEY_G,
+    KEY_H,
+    KEY_I,
+    KEY_J,
+    KEY_K,
+    KEY_L,
+    KEY_M,
+    KEY_N,
+    KEY_O,
+    KEY_P,
+    KEY_Q,
+    KEY_R,
+    KEY_S,
+    KEY_T,
+    KEY_U,
+    KEY_V,
+    KEY_W,
+    KEY_X,
+    KEY_Y,
+    KEY_Z,
+
+    KEY_0,
+    KEY_1,
+    KEY_2,
+    KEY_3,
+    KEY_4,
+    KEY_5,
+    KEY_6,
+    KEY_7,
+    KEY_8,
+    KEY_9,
+
+    KEY_SPACE,
+    KEY_COMMA,
+    KEY_PERIOD,
+
+    KEY_ENTER,
+    KEY_BACKSPACE,
+    KEY_LEFT,
+    KEY_RIGHT,
+    KEY_UP,
+    KEY_DOWN,
+
+    KEY_LEFTBRACKET,
+    KEY_RIGHTBRACKET,
+    KEY_SEMICOLON,
+    KEY_FORWARDSLASH,
+    KEY_BACKSLASH,
+    KEY_MINUS,
+    KEY_EQUAL,
+
+    KEY_TAB,
+    KEY_TICK,
+    KEY_HOME,
+    KEY_END,
+    KEY_PAGEUP,
+    KEY_PAGEDOWN,
+
+    KEY_SUPER,
+    KEY_CONTROL,
+    KEY_ALT,
+    KEY_SHFIT,
+};
+
+
+struct Vertex {
+    v2 position;
+    v2 uv;
+    v4 color;
+};
+
+struct Simple_Constants {
+    m4 transform;
+};
