@@ -32,66 +32,68 @@
 #endif
 
 #define CLAMP(V, Min, Max) ((V) < (Min) ? (Min) : (V) > (Max) ? (Max) : (V))
+#define MIN(A, B) ((A) < (B) ? (A) : (B))
+#define MAX(A, B) ((A) >= (B) ? (A) : (B))
 
-inline float32 lerp(float32 a, float32 b, float32 t) {
-    float32 result = (1.0f - t) * a + b * t;
+inline float lerp(float a, float b, float t) {
+    float result = (1.0f - t) * a + b * t;
     return result;
 }
 
 union v2 {
-    float32 e[2];
+    float e[2];
     struct {
-        float32 x, y;
+        float x, y;
     };
     struct {
-        float32 u, v;
+        float u, v;
     };
     struct {
-        float32 width, height;
+        float width, height;
     };
 };
 
 union v3 {
-    float32 e[3];
+    float e[3];
     struct {
-        float32 x, y, z;
+        float x, y, z;
     };
     struct {
-        float32 u, v, w;
+        float u, v, w;
     };
     struct {
-        float32 r, g, b;
+        float r, g, b;
     };
     struct {
-        float32 width, height, depth;
+        float width, height, depth;
     };
     struct {
         v2 xy;
-        float32 _unused0;
+        float _unused0;
     };
 };
 
 union v4 {
-    float32 e[4];
+    float e[4];
     struct {
-        float32 x, y, z, w;
+        float x, y, z, w;
     };
     struct {
-        float32 r, g, b, a;
+        float r, g, b, a;
     };
     struct {
         v2 xy;
-        float32 _unused0;
-        float32 _unused1;
+        float _unused0;
+        float _unused1;
     };
     struct {
         v3 xyz;
-        float32 _unused2;
+        float _unused2;
     };
 };
 
 union m4 {
-    float32 e[4][4];
+    float e[4][4];
     v4 columns[4];
 };
 
@@ -102,7 +104,7 @@ inline v2 V2() {
     return result;
 }
 
-inline v2 V2(float32 x, float32 y) {
+inline v2 V2(float x, float y) {
     v2 result;
     result.x = x;
     result.y = y;
@@ -117,7 +119,7 @@ inline v3 V3() {
     return result;
 }
 
-inline v3 V3(float32 x, float32 y, float32 z) {
+inline v3 V3(float x, float y, float z) {
     v3 result;
     result.x = x;
     result.y = y;
@@ -125,7 +127,7 @@ inline v3 V3(float32 x, float32 y, float32 z) {
     return result;
 }
 
-inline v3 V3(v2 xy, float32 z) {
+inline v3 V3(v2 xy, float z) {
     v3 result;
     result.x = xy.x;
     result.y = xy.y;
@@ -141,7 +143,7 @@ inline v4 V4() {
     return result;
 }
 
-inline v4 V4(float32 x, float32 y, float32 z, float32 w) {
+inline v4 V4(float x, float y, float z, float w) {
     v4 result;
     result.x = x;
     result.y = y;
@@ -150,7 +152,7 @@ inline v4 V4(float32 x, float32 y, float32 z, float32 w) {
     return result;
 }
 
-inline v4 V4(v3 v, float32 w) {
+inline v4 V4(v3 v, float w) {
     v4 result;
     result.x = v.x;
     result.y = v.y;
@@ -180,14 +182,14 @@ inline v2 negate_v2(v2 v) {
     return result;
 }
 
-inline v2 mul_v2_s(v2 v, float32 s) {
+inline v2 mul_v2_s(v2 v, float s) {
     v2 result;
     result.x = v.x * s;
     result.y = v.y * s;
     return result;
 }
 
-inline v2 div_v2_s(v2 v, float32 s) {
+inline v2 div_v2_s(v2 v, float s) {
     v2 result;
     result.x = v.x / s;
     result.y = v.y / s;
@@ -218,7 +220,7 @@ inline v3 negate_v3(v3 v) {
     return result;
 }
 
-inline v3 mul_v3_s(v3 v, float32 s) {
+inline v3 mul_v3_s(v3 v, float s) {
     v3 result;
     result.x = v.x * s;
     result.y = v.y * s;
@@ -226,7 +228,7 @@ inline v3 mul_v3_s(v3 v, float32 s) {
     return result;
 }
 
-inline v3 div_v3_s(v3 v, float32 s) {
+inline v3 div_v3_s(v3 v, float s) {
     v3 result;
     result.x = v.x / s;
     result.y = v.y / s;
@@ -261,7 +263,7 @@ inline v4 negate_v4(v4 v) {
     return result;
 }
 
-inline v4 mul_v4_s(v4 v, float32 s) {
+inline v4 mul_v4_s(v4 v, float s) {
     v4 result;
     result.x = v.x * s;
     result.y = v.y * s;
@@ -270,7 +272,7 @@ inline v4 mul_v4_s(v4 v, float32 s) {
     return result;
 }
 
-inline v4 div_v4_s(v4 v, float32 s) {
+inline v4 div_v4_s(v4 v, float s) {
     v4 result;
     result.x = v.x / s;
     result.y = v.y / s;
@@ -279,59 +281,59 @@ inline v4 div_v4_s(v4 v, float32 s) {
     return result;
 }
 
-inline float32 length2_v2(v2 v) {
-    float32 result;
+inline float length2_v2(v2 v) {
+    float result;
     result = v.x * v.x + v.y * v.y;
     return result;
 }
 
-inline float32 length_v2(v2 v) {
-    float32 result;
+inline float length_v2(v2 v) {
+    float result;
     result = sqrtf(v.x * v.x + v.y * v.y);
     return result;
 }
 
 inline v2 normalize_v2(v2 v) {
-    float32 length = length_v2(v);
+    float length = length_v2(v);
     v2 result = div_v2_s(v, length);
     return result;
 }
 
-inline float32 dot_v2(v2 a, v2 b) {
-    float32 result = a.x * b.x + a.y * b.y;
+inline float dot_v2(v2 a, v2 b) {
+    float result = a.x * b.x + a.y * b.y;
     return result;
 }
 
-inline v2 lerp_v2(v2 a, v2 b, float32 t) {
+inline v2 lerp_v2(v2 a, v2 b, float t) {
     v2 result;
     result = add_v2(mul_v2_s(a, (1.0f - t)), mul_v2_s(b, t));
     return result;
 }
 
-inline float32 length2_v3(v3 v) {
-    float32 result = v.x * v.x + v.y * v.y + v.z * v.z;
+inline float length2_v3(v3 v) {
+    float result = v.x * v.x + v.y * v.y + v.z * v.z;
     return result;
 }
 
-inline float32 length_v3(v3 v) {
-    float32 result;
+inline float length_v3(v3 v) {
+    float result;
     result = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
     return result;
 }
 
 inline v3 normalize_v3(v3 v) {
-    float32 length = length_v3(v);
+    float length = length_v3(v);
     v3 result = div_v3_s(v, length);
     return result;
 }
 
-inline float32 dot_v3(v3 a, v3 b) {
-    float32 result;
+inline float dot_v3(v3 a, v3 b) {
+    float result;
     result = a.x * b.x + a.y * b.y + a.z * b.z;
     return result; 
 }
 
-inline v3 lerp_v3(v3 a, v3 b, float32 t) {
+inline v3 lerp_v3(v3 a, v3 b, float t) {
     v3 result;
     result = add_v3(mul_v3_s(a, (1.0f - t)), mul_v3_s(b, t));
     return result;
@@ -345,30 +347,30 @@ inline v3 cross_v3(v3 a, v3 b) {
     return result;
 }
 
-inline float32 length2_v4(v4 v) {
-    float32 result = v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w;
+inline float length2_v4(v4 v) {
+    float result = v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w;
     return result;
 }
 
-inline float32 length_v4(v4 v) {
-    float32 result;
+inline float length_v4(v4 v) {
+    float result;
     result = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w);
     return result;
 }
 
 inline v4 normalize_v4(v4 v) {
-    float32 length = length_v4(v);
+    float length = length_v4(v);
     v4 result = mul_v4_s(v, length);
     return result;
 }
 
-inline float32 dot_v4(v4 a, v4 b) {
-    float32 result;
+inline float dot_v4(v4 a, v4 b) {
+    float result;
     result = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
     return result; 
 }
 
-inline v4 lerp_v4(v4 a, v4 b, float32 t) {
+inline v4 lerp_v4(v4 a, v4 b, float t) {
     v4 result;
     result = add_v4(mul_v4_s(a, (1.0f - t)), mul_v4_s(b, t));
     return result;
@@ -455,13 +457,13 @@ inline m4 scale_m4(v3 s) {
     return result;
 }
 
-inline m4 rotate_m4(v3 axis, float32 theta) {
+inline m4 rotate_m4(v3 axis, float theta) {
     m4 result = identity_m4();
     axis = normalize_v3(axis);
 
-    float32 sin_t = sinf(theta);
-    float32 cos_t = cosf(theta);
-    float32 cos_inv = 1.0f - cos_t;
+    float sin_t = sinf(theta);
+    float cos_t = cosf(theta);
+    float cos_inv = 1.0f - cos_t;
 
     result.e[0][0] = (cos_inv * axis.x * axis.x) + cos_t;
     result.e[0][1] = (cos_inv * axis.x * axis.y) + (axis.z * sin_t);
@@ -478,9 +480,9 @@ inline m4 rotate_m4(v3 axis, float32 theta) {
     return result; 
 }
 
-inline m4 perspective_projection_rh(float32 fov, float32 aspect_ratio, float32 near, float32 far) {
+inline m4 perspective_projection_rh(float fov, float aspect_ratio, float near, float far) {
     m4 result{};
-    float32 c = 1.0f / tanf(fov / 2.0f);
+    float c = 1.0f / tanf(fov / 2.0f);
     result.e[0][0] = c / aspect_ratio;
     result.e[1][1] = c;
     result.e[2][3] = -1.0f;
@@ -533,7 +535,7 @@ inline m4 look_at_lh(v3 eye, v3 target, v3 up) {
     return result;
 }
 
-inline m4 ortho_rh_zo(float32 left, float32 right, float32 bottom, float32 top, float32 near, float32 far) {
+inline m4 ortho_rh_zo(float left, float right, float bottom, float top, float near, float far) {
     m4 result = identity_m4();
     result.e[0][0] = 2.0f / (right - left);
     result.e[1][1] = 2.0f / (top - bottom);
@@ -547,18 +549,18 @@ inline m4 ortho_rh_zo(float32 left, float32 right, float32 bottom, float32 top, 
 
 // OVERLOADED FUNCTIONS
 #ifdef __cplusplus
-inline float32 dot(v2 a, v2 b) {
-    float32 result = dot_v2(a, b);
+inline float dot(v2 a, v2 b) {
+    float result = dot_v2(a, b);
     return result;
 }
 
-inline float32 length2(v2 v) {
-    float32 result = length2_v2(v);
+inline float length2(v2 v) {
+    float result = length2_v2(v);
     return result;
 }
 
-inline float32 length(v2 v) {
-    float32 result = length_v2(v);
+inline float length(v2 v) {
+    float result = length_v2(v);
     return result;
 }
 
@@ -567,23 +569,23 @@ inline v2 normalize(v2 v) {
     return result;
 }
 
-inline float32 dot(v3 a, v3 b) {
-    float32 result = dot_v3(a, b);
+inline float dot(v3 a, v3 b) {
+    float result = dot_v3(a, b);
     return result;
 }
 
-inline v2 lerp(v2 a, v2 b, float32 t) {
+inline v2 lerp(v2 a, v2 b, float t) {
     v2 result = lerp_v2(a, b, t);
     return result; 
 }
 
-inline float32 length2(v3 v) {
-    float32 result = length2_v3(v);
+inline float length2(v3 v) {
+    float result = length2_v3(v);
     return result;
 }
 
-inline float32 length(v3 v) {
-    float32 result = length_v3(v);
+inline float length(v3 v) {
+    float result = length_v3(v);
     return result;
 }
 
@@ -592,23 +594,23 @@ inline v3 normalize(v3 v) {
     return result;
 }
 
-inline v3 lerp(v3 a, v3 b, float32 t) {
+inline v3 lerp(v3 a, v3 b, float t) {
     v3 result = lerp_v3(a, b, t);
     return result; 
 }
 
-inline float32 dot(v4 a, v4 b) {
-    float32 result = dot_v4(a, b);
+inline float dot(v4 a, v4 b) {
+    float result = dot_v4(a, b);
     return result;
 }
 
-inline float32 length2(v4 v) {
-    float32 result = length2_v4(v);
+inline float length2(v4 v) {
+    float result = length2_v4(v);
     return result;
 }
 
-inline float32 length(v4 v) {
-    float32 result = length_v4(v);
+inline float length(v4 v) {
+    float result = length_v4(v);
     return result;
 }
 
@@ -617,7 +619,7 @@ inline v4 normalize(v4 v) {
     return result;
 }
 
-inline v4 lerp(v4 a, v4 b, float32 t) {
+inline v4 lerp(v4 a, v4 b, float t) {
     v4 result = lerp_v4(a, b, t);
     return result; 
 }
@@ -647,7 +649,7 @@ inline m4 scale(v3 v) {
     return result;
 }
 
-inline m4 rotate(v3 v, float32 theta) {
+inline m4 rotate(v3 v, float theta) {
     m4 result = rotate_m4(v, theta);
     return result;
 }
@@ -733,62 +735,62 @@ inline v4 operator-=(v4 &a, v4 b) {
     return a;
 }
 
-inline v2 operator*(v2 v, float32 s) {
+inline v2 operator*(v2 v, float s) {
     v2 result = mul_v2_s(v, s);
     return result; 
 }
 
-inline v3 operator*(v3 v, float32 s) {
+inline v3 operator*(v3 v, float s) {
     v3 result = mul_v3_s(v, s);
     return result; 
 }
 
-inline v4 operator*(v4 v, float32 s) {
+inline v4 operator*(v4 v, float s) {
     v4 result = mul_v4_s(v, s);
     return result; 
 }
 
-inline v2 operator/(v2 v, float32 s) {
+inline v2 operator/(v2 v, float s) {
     v2 result = div_v2_s(v, s);
     return result;
 }
 
-inline v3 operator/(v3 v, float32 s) {
+inline v3 operator/(v3 v, float s) {
     v3 result = div_v3_s(v, s);
     return result;
 }
 
-inline v4 operator/(v4 v, float32 s) {
+inline v4 operator/(v4 v, float s) {
     v4 result = div_v4_s(v, s);
     return result;
 }
 
-inline v2 operator*=(v2 &v, float32 s) {
+inline v2 operator*=(v2 &v, float s) {
     v = v * s;
     return v;
 }
 
-inline v3 operator*=(v3 &v, float32 s) {
+inline v3 operator*=(v3 &v, float s) {
     v = v * s;
     return v;
 }
 
-inline v4 operator*=(v4 &v, float32 s) {
+inline v4 operator*=(v4 &v, float s) {
     v = v * s;
     return v;
 }
 
-inline v2 operator/=(v2 &v, float32 s) {
+inline v2 operator/=(v2 &v, float s) {
     v = v / s;
     return v;
 }
 
-inline v3 operator/=(v3 &v, float32 s) {
+inline v3 operator/=(v3 &v, float s) {
     v = v / s;
     return v;
 }
 
-inline v4 operator/=(v4 &v, float32 s) {
+inline v4 operator/=(v4 &v, float s) {
     v = v / s;
     return v;
 }
