@@ -7,11 +7,6 @@
 
 extern Array<Vertex> vertices;
 
-int64 get_line_length(Buffer *buffer, int64 line) {
-    int64 length = buffer->line_starts[line + 1] - buffer->line_starts[line];
-    return length;
-}
-
 float get_string_width(Face *face, char *str, int64 count) {
     float result = 0.0f;
     for (int64 i = 0; i < count; i++) {

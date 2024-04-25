@@ -58,18 +58,6 @@ struct Shader {
     ID3D11PixelShader *pixel_shader;
 };
 
-void self_insert(View *view, char c) {
-    buffer_insert(view->buffer, view->cursor.position, c);
-    view->cursor.col++;
-    view->cursor.position++;
-
-    // move to newline
-    if (c == '\n') {
-        view->cursor.col = 0;
-        view->cursor.line++;
-    }
-}
-
 void *allocate_system_event(size_t size) {
     void *event = calloc(1, size); 
     return event;
@@ -92,20 +80,41 @@ Key_Stroke *make_key_stroke_event(Key_Code code, Key_Modifiers modifiers) {
     return key_stroke;
 }
 
+Text_Input *make_text_input(char *text, int64 count) {
+    Text_Input *text_input = (Text_Input *)allocate_system_event(sizeof(Text_Input));
+    *text_input = Text_Input();
+    text_input->text = text;
+    text_input->count = count;
+    return text_input; 
+}
+
 void win32_keycodes_init() {
     for (int i = 0; i < 26; i++) {
         keycode_lookup['A' + i] = (Key_Code)(KEY_A + i);
     }
     for (int i = 0; i < 10; i++) {
-        keycode_lookup['0' + i] = (Key_Code)(KEY_A + i);
+        keycode_lookup['0' + i] = (Key_Code)(KEY_0 + i);
     }
+
+    keycode_lookup[VK_SPACE] = KEY_SPACE;
+    keycode_lookup[VK_OEM_COMMA] = KEY_COMMA;
+    keycode_lookup[VK_OEM_PERIOD] = KEY_PERIOD;
 
     keycode_lookup[VK_RETURN] = KEY_ENTER;
     keycode_lookup[VK_BACK] = KEY_BACKSPACE;
+    
     keycode_lookup[VK_LEFT] = KEY_LEFT;
     keycode_lookup[VK_RIGHT] = KEY_RIGHT;
     keycode_lookup[VK_UP] = KEY_UP;
     keycode_lookup[VK_DOWN] = KEY_DOWN;
+
+    keycode_lookup[VK_OEM_4] = KEY_LEFT_BRACKET;
+    keycode_lookup[VK_OEM_6] = KEY_RIGHT_BRACKET;
+    keycode_lookup[VK_OEM_1] = KEY_SEMICOLON;
+    keycode_lookup[VK_OEM_2] = KEY_SLASH;
+    keycode_lookup[VK_OEM_5] = KEY_BACKSLASH;
+    keycode_lookup[VK_OEM_MINUS] = KEY_MINUS;
+    keycode_lookup[VK_OEM_PLUS] = KEY_PLUS;
 
     for (int i = 0; i < 12; i++) {
         keycode_lookup[VK_F1 + i] = (Key_Code)(KEY_F1 + i);
@@ -217,11 +226,12 @@ LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) 
         else if (vk == VK_MENU) alt_down = key_down;
 
         if (key_down) {
+            printf("WM_KEYDOWN\n");
             Key_Code code = keycode_lookup[vk];
             if (code) {
                 Key_Modifiers modifiers = make_key_modifiers(shift_down, control_down, alt_down);
                 Key_Stroke *key_stroke = make_key_stroke_event(code, modifiers);
-                system_events.push(key_stroke);
+                active_key_stroke = key_stroke;
             }
         }
         break;
@@ -229,13 +239,19 @@ LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_CHAR:
     {
+        printf("WM_CHAR\n");
         uint16 vk = wParam & 0x0000ffff;
         uint8 c = (uint8)vk;
         if (c == '\r') {
             c = '\n';
         }
         if (c < 127) {
-            self_insert(active_view, c);
+            char *text = (char *)malloc(1);
+            text[0] = c;
+            Text_Input *text_input = make_text_input(text, 1);
+            if (active_key_stroke) {
+                active_text_input = text_input;
+            }
         }
         break;
     }
@@ -521,13 +537,70 @@ uint16 key_stroke_to_key(Key_Stroke *key_stroke) {
     return result;
 }
 
-COMMAND_SIG(debug_command) {
+COMMAND(debug_command) {
     printf("DEBUG\n");
 }
 
-COMMAND_SIG(quit_command) {
+COMMAND(quit_command) {
     printf("QUITTING\n");
     window_should_close = true;
+}
+
+COMMAND(newline) {
+    buffer_insert(active_view->buffer, active_view->cursor.position, '\n');
+    active_view->cursor.position++;
+    active_view->cursor.col = 0;
+    active_view->cursor.line++;
+}
+
+COMMAND(self_insert) {
+    assert(active_text_input);
+    buffer_insert(active_view->buffer, active_view->cursor.position, active_text_input->text[0]);
+    active_view->cursor.col++;
+    active_view->cursor.position++;
+}
+
+COMMAND(backward_char) {
+    View *view = active_view;
+    view->cursor.col--;
+    view->cursor.position--;
+    if (view->cursor.col < 0) {
+        view->cursor.col = 0;
+        view->cursor.position++;
+    }
+}
+
+COMMAND(forward_char) {
+    View *view = active_view;
+    view->cursor.col++;
+    view->cursor.position++;
+    if (view->cursor.col >= get_line_length(view->buffer, view->cursor.line)) {
+        view->cursor.col--;
+        view->cursor.position--;
+    }
+}
+
+COMMAND(previous_line) {
+    View *view = active_view;
+    view->cursor.line = CLAMP(view->cursor.line - 1, 0, get_line_count(view->buffer) - 1);
+    view->cursor.position = view->buffer->line_starts[view->cursor.line];
+    view->cursor.col = 0;
+}
+
+COMMAND(next_line) {
+    View *view = active_view;
+    view->cursor.line = CLAMP(view->cursor.line + 1, 0, get_line_count(view->buffer) - 1);
+    view->cursor.position = view->buffer->line_starts[view->cursor.line];
+    view->cursor.col = 0;
+}
+
+COMMAND(backward_delete_char) {
+    View *view = active_view;
+    if (view->cursor.position > 0) {
+        buffer_delete(view->buffer, view->cursor.position);
+        view->cursor.position--;
+        view->cursor.col--;
+    }
 }
 
 Key_Command make_key_command(const char *name, Command_Proc procedure) {
@@ -541,6 +614,37 @@ Key_Map *default_key_map() {
     Key_Map *key_map = (Key_Map *)calloc(1, sizeof(Key_Map));
     key_map->commands[KEYMOD_CONTROL | KEY_S] = make_key_command("debug command", debug_command);
     key_map->commands[KEYMOD_ALT | KEY_F4] = make_key_command("quit", quit_command);
+    key_map->commands[KEY_ENTER] = make_key_command("newline", newline);
+
+    Key_Command self_insert_command = make_key_command("self_insert", self_insert);
+
+    for (Key_Code key = KEY_A; key <= KEY_Z; key = (Key_Code)(key + 1)) {
+        key_map->commands[key] = self_insert_command;
+        key_map->commands[KEYMOD_SHIFT | key] = self_insert_command;
+    }
+    for (Key_Code key = KEY_0; key <= KEY_9; key = (Key_Code)(key + 1)) {
+        key_map->commands[KEYMOD_SHIFT | key] = self_insert_command;
+        key_map->commands[key] = self_insert_command;
+    }
+    key_map->commands[KEY_SPACE] = self_insert_command;
+    key_map->commands[KEY_COMMA] = self_insert_command;
+    key_map->commands[KEY_PERIOD] = self_insert_command;
+    key_map->commands[KEY_LEFT_BRACKET] = self_insert_command;
+    key_map->commands[KEY_RIGHT_BRACKET] = self_insert_command;
+    key_map->commands[KEY_SEMICOLON] = self_insert_command;
+    key_map->commands[KEY_SLASH] = self_insert_command;
+    key_map->commands[KEY_BACKSLASH] = self_insert_command;
+    key_map->commands[KEY_MINUS] = self_insert_command;
+    key_map->commands[KEY_PLUS] = self_insert_command;
+
+    key_map->commands[KEY_LEFT] = make_key_command("backward_char", backward_char);
+    key_map->commands[KEY_RIGHT] = make_key_command("forward_char", forward_char);
+
+    key_map->commands[KEY_UP] = make_key_command("previous_line", previous_line);
+    key_map->commands[KEY_DOWN] = make_key_command("next_line", next_line);
+
+    key_map->commands[KEY_BACKSPACE] = make_key_command("backward_delete_char", backward_delete_char);
+
     return key_map;
 }
 
@@ -689,31 +793,35 @@ int main(int argc, char **argv) {
         }
 
         for (int i = 0; i < system_events.count; i++) {
-            System_Event *system_event = system_events[i];
-            switch (system_event->type) {
-            case SYSTEM_EVENT_KEY_STROKE:
-            {
-                Key_Stroke *key_stroke = static_cast<Key_Stroke *>(system_event);
-                uint16 key = key_stroke_to_key(key_stroke);
-                assert(key < MAX_KEY_COUNT);
-                Key_Command command = active_keymap->commands[key];
-                if (command.procedure) {
-                    printf("executing '%s'\n", command.name);
-                    command.procedure();
-                }
-                break;
-            }
+            System_Event *event = system_events[i];
+            switch (event->type) {
             case SYSTEM_EVENT_WINDOW_RESIZE:
             {
-                Window_Resize *event = static_cast<Window_Resize *>(system_event);
-                d3d11_resize_render_target(event->width, event->height);
+                Window_Resize *resize_event = static_cast<Window_Resize *>(event);
+                d3d11_resize_render_target(resize_event->width, resize_event->height);
+                free(event);
                 break;
             }
             }
-
-            free(system_event);
         }
         system_events.reset_count();
+
+
+        if (active_key_stroke) {
+            uint16 key = key_stroke_to_key(active_key_stroke);
+            assert(key < MAX_KEY_COUNT);
+            Key_Command *command = &active_keymap->commands[key];
+            if (command->procedure) {
+                printf("executing '%s'\n", command->name);
+                command->procedure();
+            }
+
+            free(active_key_stroke);
+            active_key_stroke = nullptr;
+
+            free(active_text_input);
+            active_text_input = nullptr;
+        }
 
         int width, height;
         win32_get_window_size(window, &width, &height);

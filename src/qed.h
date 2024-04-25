@@ -6,7 +6,7 @@
 #include "buffer.h" 
 
 typedef void (*Command_Proc)();
-#define COMMAND_SIG(Name) void Name()
+#define COMMAND(Name) void Name()
 
 #define KEYMOD_CONTROL (1 << 10)
 #define KEYMOD_ALT     (1 << 9)
@@ -72,13 +72,13 @@ enum Key_Code {
     KEY_UP,
     KEY_DOWN,
 
-    KEY_LEFTBRACKET,
-    KEY_RIGHTBRACKET,
+    KEY_LEFT_BRACKET,
+    KEY_RIGHT_BRACKET,
     KEY_SEMICOLON,
-    KEY_FORWARDSLASH,
+    KEY_SLASH,
     KEY_BACKSLASH,
     KEY_MINUS,
-    KEY_EQUAL,
+    KEY_PLUS,
 
     KEY_TAB,
     KEY_TICK,
@@ -142,9 +142,6 @@ struct View {
     Face *face;
 };
 
-
-void draw_view(View *view);
-
 struct Input {
     bool capture_cursor;
     int cursor_px, cursor_py;
@@ -201,3 +198,5 @@ struct Vertex {
 struct Simple_Constants {
     m4 transform;
 };
+
+void draw_view(View *view);

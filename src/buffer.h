@@ -19,4 +19,7 @@ struct Buffer {
 };
 
 void buffer_insert(Buffer *buffer, int64 position, char c);
+void buffer_delete(Buffer *buffer, int64 position);
 Buffer *make_buffer_from_file(const char *file_name);
+int64 get_line_length(Buffer *buffer, int64 line);
+int64 get_line_count(Buffer *buffer);

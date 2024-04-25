@@ -11,6 +11,16 @@
 
 void buffer_update_line_starts(Buffer *buffer);
 
+int64 get_line_length(Buffer *buffer, int64 line) {
+    int64 length = buffer->line_starts[line + 1] - buffer->line_starts[line];
+    return length;
+}
+
+int64 get_line_count(Buffer *buffer) {
+    int64 result = buffer->line_starts.count - 1;
+    return result;
+}
+
 Buffer *make_buffer_from_file(const char *file_name) {
     Read_File file = read_entire_file(file_name);
     assert(file.data);
@@ -128,6 +138,15 @@ void buffer_insert(Buffer *buffer, int64 position, char c) {
     buffer->text[position] = c;
     buffer->gap_start++;
 
+    buffer_update_line_starts(buffer);
+}
+
+void buffer_delete(Buffer *buffer, int64 position) {
+    if (buffer->gap_start != position) {
+        buffer_shift_gap(buffer, position);
+    }
+
+    buffer->gap_start--;
     buffer_update_line_starts(buffer);
 }
 
