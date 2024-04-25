@@ -9,6 +9,8 @@
 #define GAP_SIZE(Buffer) (Buffer->gap_end - Buffer->gap_start)
 #define BUFFER_SIZE(Buffer) (Buffer->size - GAP_SIZE(Buffer))
 
+void buffer_update_line_starts(Buffer *buffer);
+
 Buffer *make_buffer_from_file(const char *file_name) {
     Read_File file = read_entire_file(file_name);
     assert(file.data);
@@ -18,6 +20,7 @@ Buffer *make_buffer_from_file(const char *file_name) {
     buffer->gap_start = 0;
     buffer->gap_end = 0;
     buffer->size = file.count;
+    buffer_update_line_starts(buffer);
     buffer->file_handle = file.handle;
     File_Attributes attribs = get_file_attributes(file_name);
     buffer->last_write_time = attribs.last_write_time;
@@ -71,12 +74,6 @@ void buffer_update_line_starts(Buffer *buffer) {
         }
     }
     buffer->line_starts.push(BUFFER_SIZE(buffer) + 1);
-
-    puts("Line Starts");
-    for (int i = 0; i < buffer->line_starts.count; i++) {
-        printf("%lld\n", buffer->line_starts[i]);
-    }
-    puts("");
 }
 
 void buffer_grow(Buffer *buffer, int64 gap_size) {

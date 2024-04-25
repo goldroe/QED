@@ -7,6 +7,21 @@
 
 extern Array<Vertex> vertices;
 
+int64 get_line_length(Buffer *buffer, int64 line) {
+    int64 length = buffer->line_starts[line + 1] - buffer->line_starts[line];
+    return length;
+}
+
+float get_string_width(Face *face, char *str, int64 count) {
+    float result = 0.0f;
+    for (int64 i = 0; i < count; i++) {
+        char c = str[i];
+        Glyph *glyph = &face->glyphs[c];
+        result += glyph->ax;
+    }
+    return result;
+}
+
 void draw_vertex(float x, float y, float u, float v, v4 color) {
     Vertex vertex;
     vertex.position.x = x;
@@ -70,10 +85,12 @@ void draw_view(View *view) {
     memcpy(string + view->buffer->gap_start, view->buffer->text + view->buffer->gap_end, view->buffer->size - view->buffer->gap_end);
 
     draw_string(view->face, string, count, text_color);
-    free(string);
 
-    float cx = view->cursor.col * view->face->glyph_width;
+    float cw = get_string_width(view->face, string + view->cursor.position, 1);
+    float cx = get_string_width(view->face, string + view->buffer->line_starts[view->cursor.line], view->cursor.col);
     float cy = view->cursor.line * view->face->glyph_height;
-    Rect rc = {cx, cy, cx + view->face->glyph_width, cy + view->face->glyph_height };
+    Rect rc = { cx, cy, cx + cw, cy + view->face->glyph_height };
     draw_rectangle(rc, cursor_color);
+
+    free(string);
 }

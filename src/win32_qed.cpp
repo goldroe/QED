@@ -43,20 +43,19 @@ int vertex_buffer_capacity;
 
 Array<System_Event *> system_events;
 
+Key_Stroke *active_key_stroke;
+Text_Input *active_text_input;
+
 View *active_view;
 Key_Code keycode_lookup[256];
+
+Key_Map *active_keymap;
 
 struct Shader {
     char *name;
     ID3D11InputLayout *input_layout;
     ID3D11VertexShader *vertex_shader;
     ID3D11PixelShader *pixel_shader;
-};
-
-struct Render_Target {
-    int width;
-    int height;
-    Array<Vertex> vertices;
 };
 
 void self_insert(View *view, char c) {
@@ -76,12 +75,21 @@ void *allocate_system_event(size_t size) {
     return event;
 }
 
-Window_Size_Event *make_window_size_event(int width, int height) {
-    Window_Size_Event *event = (Window_Size_Event *)allocate_system_event(sizeof(Window_Size_Event));
-    event->type = SYSTEM_EVENT_WINDOW_SIZE;
+Window_Resize *make_window_resize_event(int width, int height) {
+    Window_Resize *event = (Window_Resize *)allocate_system_event(sizeof(Window_Resize));
+    *event = Window_Resize();
+    event->type = SYSTEM_EVENT_WINDOW_RESIZE;
     event->width = width;
     event->height = height;
     return event;
+}
+
+Key_Stroke *make_key_stroke_event(Key_Code code, Key_Modifiers modifiers) {
+    Key_Stroke *key_stroke = (Key_Stroke *)allocate_system_event(sizeof(Key_Stroke));
+    *key_stroke = Key_Stroke();
+    key_stroke->code = code;
+    key_stroke->modifiers = modifiers;
+    return key_stroke;
 }
 
 void win32_keycodes_init() {
@@ -98,6 +106,10 @@ void win32_keycodes_init() {
     keycode_lookup[VK_RIGHT] = KEY_RIGHT;
     keycode_lookup[VK_UP] = KEY_UP;
     keycode_lookup[VK_DOWN] = KEY_DOWN;
+
+    for (int i = 0; i < 12; i++) {
+        keycode_lookup[VK_F1 + i] = (Key_Code)(KEY_F1 + i);
+    }
 }
 
 void win32_get_window_size(HWND hwnd, int *width, int *height) {
@@ -172,15 +184,47 @@ Read_File read_entire_file(const char *file_name) {
     return result;
 }
 
+inline Key_Modifiers make_key_modifiers(bool shift, bool control, bool alt) {
+    Key_Modifiers modifiers = KEY_MODIFIER_NONE;
+    modifiers = (Key_Modifiers)((int)modifiers | (int)(shift ? (int)KEY_MODIFIER_SHIFT : 0));
+    modifiers = (Key_Modifiers)((int)modifiers | (int)(control ? (int)KEY_MODIFIER_CONTROL : 0));
+    modifiers = (Key_Modifiers)((int)modifiers | (int)(alt ? (int)KEY_MODIFIER_ALT : 0));
+    return modifiers;
+}
+
 LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
+    static bool shift_down = false;
+    static bool control_down = false;
+    static bool alt_down = false;
+    
     LRESULT result = 0;
     switch (Msg) {
+    case WM_MENUCHAR:
+    {
+        result = (MNC_CLOSE << 16);
+        break;
+    }
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
     case WM_KEYDOWN:
     case WM_KEYUP:
     {
-        bool key_down = ((uint32)lParam >> 31) == 0;
+        bool key_down = (lParam & (1 << 31)) == 0;
+        bool was_down = (lParam & (1 << 30)) == 1;
         uint64 vk = wParam;
-       break;
+        if (vk == VK_SHIFT) shift_down = key_down;
+        else if (vk == VK_CONTROL) control_down = key_down;
+        else if (vk == VK_MENU) alt_down = key_down;
+
+        if (key_down) {
+            Key_Code code = keycode_lookup[vk];
+            if (code) {
+                Key_Modifiers modifiers = make_key_modifiers(shift_down, control_down, alt_down);
+                Key_Stroke *key_stroke = make_key_stroke_event(code, modifiers);
+                system_events.push(key_stroke);
+            }
+        }
+        break;
     }
 
     case WM_CHAR:
@@ -200,8 +244,8 @@ LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) 
     {
         UINT width = LOWORD(lParam);
         UINT height = HIWORD(lParam);
-        Window_Size_Event *event = make_window_size_event(width, height);
-        system_events.push(event);
+        Window_Resize *resize = make_window_resize_event(width, height);
+        system_events.push(resize);
         break;
     }
 
@@ -469,11 +513,44 @@ Shader *make_shader(const char *file_name, const char *vs_entry, const char *ps_
     return shader;
 }
 
+uint16 key_stroke_to_key(Key_Stroke *key_stroke) {
+    uint16 result = (uint8)key_stroke->code;
+    if (key_stroke->modifiers & KEY_MODIFIER_SHIFT) result |= KEYMOD_SHIFT;
+    if (key_stroke->modifiers & KEY_MODIFIER_CONTROL) result |= KEYMOD_CONTROL;
+    if (key_stroke->modifiers & KEY_MODIFIER_ALT) result |= KEYMOD_ALT;
+    return result;
+}
+
+COMMAND_SIG(debug_command) {
+    printf("DEBUG\n");
+}
+
+COMMAND_SIG(quit_command) {
+    printf("QUITTING\n");
+    window_should_close = true;
+}
+
+Key_Command make_key_command(const char *name, Command_Proc procedure) {
+    Key_Command command;
+    command.name = name;
+    command.procedure = procedure;
+    return command;
+}
+
+Key_Map *default_key_map() {
+    Key_Map *key_map = (Key_Map *)calloc(1, sizeof(Key_Map));
+    key_map->commands[KEYMOD_CONTROL | KEY_S] = make_key_command("debug command", debug_command);
+    key_map->commands[KEYMOD_ALT | KEY_F4] = make_key_command("quit", quit_command);
+    return key_map;
+}
+
 int main(int argc, char **argv) {
     // UINT desired_scheduler_ms = 1;
     // timeBeginPeriod(desired_scheduler_ms);
 
     win32_keycodes_init();
+
+    active_keymap = default_key_map();
 
 #define CLASSNAME L"QED_WINDOW_CLASS"
     HINSTANCE hinstance = GetModuleHandle(NULL);
@@ -589,7 +666,7 @@ int main(int argc, char **argv) {
     };
     Shader *simple_shader = make_shader("simple.hlsl", "vs_main", "ps_main", simple_layout, ARRAYSIZE(simple_layout));
 
-    Face *face = load_font_face("fonts/Inconsolata.ttf", 16);
+    Face *face = load_font_face("fonts/Inconsolata.ttf", 24);
 
     ID3D11Buffer *simple_constant_buffer = make_constant_buffer(sizeof(Simple_Constants));
 
@@ -611,13 +688,24 @@ int main(int argc, char **argv) {
             DispatchMessageW(&message);
         }
 
-
         for (int i = 0; i < system_events.count; i++) {
             System_Event *system_event = system_events[i];
             switch (system_event->type) {
-            case SYSTEM_EVENT_WINDOW_SIZE:
+            case SYSTEM_EVENT_KEY_STROKE:
             {
-                Window_Size_Event *event = static_cast<Window_Size_Event *>(system_event);
+                Key_Stroke *key_stroke = static_cast<Key_Stroke *>(system_event);
+                uint16 key = key_stroke_to_key(key_stroke);
+                assert(key < MAX_KEY_COUNT);
+                Key_Command command = active_keymap->commands[key];
+                if (command.procedure) {
+                    printf("executing '%s'\n", command.name);
+                    command.procedure();
+                }
+                break;
+            }
+            case SYSTEM_EVENT_WINDOW_RESIZE:
+            {
+                Window_Resize *event = static_cast<Window_Resize *>(system_event);
                 d3d11_resize_render_target(event->width, event->height);
                 break;
             }
@@ -667,6 +755,7 @@ int main(int argc, char **argv) {
 
         UINT stride = sizeof(Vertex), offset = 0;
         d3d11_context->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset);
+
 
         simple_constants.transform = projection;
         upload_constants(simple_constant_buffer, &simple_constants, sizeof(Simple_Constants));
