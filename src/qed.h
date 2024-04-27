@@ -64,6 +64,7 @@ enum Key_Code {
     KEY_SPACE,
     KEY_COMMA,
     KEY_PERIOD,
+    KEY_QUOTE,
 
     KEY_ENTER,
     KEY_BACKSPACE,
@@ -133,13 +134,13 @@ struct Face {
 };
 
 struct View {
+    Face *face;
     Rect rect;
 
     Buffer *buffer;
-
     Cursor cursor;
 
-    Face *face;
+    int y_off;
 };
 
 struct Input {
@@ -199,4 +200,10 @@ struct Simple_Constants {
     m4 transform;
 };
 
+struct String {
+    char *data;
+    int64 count;
+};
+
 void draw_view(View *view);
+String buffer_to_string(Buffer *buffer);

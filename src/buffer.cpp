@@ -21,19 +21,57 @@ int64 get_line_count(Buffer *buffer) {
     return result;
 }
 
+int64 get_buffer_length(Buffer *buffer) {
+    int64 result = BUFFER_SIZE(buffer);
+    return result;
+}
+
+void remove_crlf(char *data, int64 count, char **out_data, int64 *out_count) {
+    char *result = (char *)malloc(count);
+    char *src = data;
+    char *src_end = data + count;
+    char *dest = result;
+    while (src < data + count) {
+        switch (*src) {
+        default:
+            *dest++ = *src++;
+            break;
+        case '\r':
+            src++;
+            if (src < src_end && *src == '\n') src++;
+            *dest++ = '\n';
+            break;
+        case '\n':
+            src++;
+            if (src < src_end && *src == '\r') src++;
+            *dest++ = '\n';
+            break;
+        }
+    }
+
+    int64 new_count = src - data;
+    result = (char *)realloc(result, new_count);
+    if (out_data) *out_data = result;
+    if (out_count) *out_count = new_count;
+}
+
 Buffer *make_buffer_from_file(const char *file_name) {
     Read_File file = read_entire_file(file_name);
     assert(file.data);
+    char *lf_string = nullptr;
+    int64 lf_count = 0;
+    remove_crlf((char *)file.data, file.count, &lf_string, &lf_count);
     Buffer *buffer = new Buffer();
     buffer->file_name = file_name;
-    buffer->text = (char *)file.data;
+    buffer->text = lf_string;
     buffer->gap_start = 0;
     buffer->gap_end = 0;
-    buffer->size = file.count;
+    buffer->size = lf_count;
     buffer_update_line_starts(buffer);
     buffer->file_handle = file.handle;
     File_Attributes attribs = get_file_attributes(file_name);
     buffer->last_write_time = attribs.last_write_time;
+    free(file.data);
     return buffer;
 }
 
@@ -150,12 +188,12 @@ void buffer_delete(Buffer *buffer, int64 position) {
     buffer_update_line_starts(buffer);
 }
 
-Cursor cursor_from_position(Buffer *buffer, int64 position) {
+Cursor get_cursor_from_position(Buffer *buffer, int64 position) {
     Cursor cursor = {};
     for (int line = 0; line < buffer->line_starts.count - 1; line++) {
         int64 start = buffer->line_starts[line];
         int64 end = buffer->line_starts[line + 1];
-        if (start <= position && position <= end) {
+        if (start <= position && position < end) {
             cursor.line = line;
             cursor.col = position - start;
             break;
@@ -163,5 +201,10 @@ Cursor cursor_from_position(Buffer *buffer, int64 position) {
     }
     cursor.position = position;
     return cursor;
+}
+
+int64 get_position_from_line(Buffer *buffer, int64 line) {
+    int64 position = buffer->line_starts[line];
+    return position;
 }
 
