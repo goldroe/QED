@@ -58,6 +58,81 @@ struct Shader {
     ID3D11PixelShader *pixel_shader;
 };
 
+
+
+COMMAND(quit_qed) {
+    window_should_close = true;
+}
+
+COMMAND(newline) {
+    buffer_insert(active_view->buffer, active_view->cursor.position, '\n');
+    active_view->cursor.position++;
+    active_view->cursor.col = 0;
+    active_view->cursor.line++;
+}
+
+COMMAND(self_insert) {
+    assert(active_text_input);
+    buffer_insert(active_view->buffer, active_view->cursor.position, active_text_input->text[0]);
+    active_view->cursor.col++;
+    active_view->cursor.position++;
+}
+
+COMMAND(backward_char) {
+    View *view = active_view;
+    if (view->cursor.position > 0) {
+        Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position - 1);
+        view->cursor = cursor;
+    }
+}
+
+COMMAND(forward_char) {
+    View *view = active_view;
+    if (view->cursor.position < get_buffer_length(view->buffer)) {
+        Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position + 1);
+        view->cursor = cursor;
+    }
+}
+
+COMMAND(previous_line) {
+    View *view = active_view;
+    if (view->cursor.line > 0) {
+        int64 position = get_position_from_line(view->buffer, view->cursor.line - 1);
+        Cursor cursor = get_cursor_from_position(view->buffer, position);
+        view->cursor = cursor;
+    }
+}
+
+COMMAND(next_line) {
+    View *view = active_view;
+    if (view->cursor.line < get_line_count(view->buffer) - 1) {
+        int64 position = get_position_from_line(view->buffer, view->cursor.line + 1);
+        Cursor cursor = get_cursor_from_position(view->buffer, position);
+        view->cursor = cursor;
+    }
+}
+
+COMMAND(backward_delete_char) {
+    View *view = active_view;
+    if (view->cursor.position > 0) {
+        buffer_delete(view->buffer, view->cursor.position);
+        Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position - 1);
+        view->cursor = cursor;
+    }
+}
+
+COMMAND(wheel_scroll_up) {
+    int scroll_dt = 10;
+    View *view = active_view;
+    view->y_off -= scroll_dt;
+}
+
+COMMAND(wheel_scroll_down) {
+    int scroll_dt = 10;
+    View *view = active_view;
+    view->y_off += scroll_dt;
+}
+
 void *allocate_system_event(size_t size) {
     void *event = calloc(1, size); 
     return event;
@@ -115,6 +190,8 @@ void win32_keycodes_init() {
     keycode_lookup[VK_OEM_5] = KEY_BACKSLASH;
     keycode_lookup[VK_OEM_MINUS] = KEY_MINUS;
     keycode_lookup[VK_OEM_PLUS] = KEY_PLUS;
+    keycode_lookup[VK_OEM_3] = KEY_TICK;
+    keycode_lookup[VK_OEM_7] = KEY_QUOTE;
 
     for (int i = 0; i < 12; i++) {
         keycode_lookup[VK_F1 + i] = (Key_Code)(KEY_F1 + i);
@@ -226,20 +303,66 @@ LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) 
         else if (vk == VK_MENU) alt_down = key_down;
 
         if (key_down) {
-            printf("WM_KEYDOWN\n");
             Key_Code code = keycode_lookup[vk];
             if (code) {
                 Key_Modifiers modifiers = make_key_modifiers(shift_down, control_down, alt_down);
                 Key_Stroke *key_stroke = make_key_stroke_event(code, modifiers);
+                if (active_key_stroke) free(active_key_stroke);
                 active_key_stroke = key_stroke;
             }
         }
         break;
     }
 
+    case WM_LBUTTONUP:
+    case WM_LBUTTONDOWN:
+    {
+        int x = GET_X_LPARAM(lParam); 
+        int y = GET_Y_LPARAM(lParam); 
+        y += active_view->y_off;
+        String string = buffer_to_string(active_view->buffer);
+        int line = (int)(y / active_view->face->glyph_height);
+
+        // get cursor position from mouse click
+        for (int64 line = 0; line < (int64)active_view->buffer->line_starts.count; line++) {
+            float y0 = line * active_view->face->glyph_height;
+            float y1 = y0 + active_view->face->glyph_height;
+            if (y0 <= y && y <= y1) {
+                float x0 = 0.0f;
+                for (int64 position = active_view->buffer->line_starts[line]; position < active_view->buffer->line_starts[line + 1] - 1; position++) {
+                    char c = string.data[position];
+                    Glyph *glyph = &active_view->face->glyphs[c];
+                    float x1 = x0 + glyph->ax;
+                    if (x0 <= x && x <= x1) {
+                        int64 col = position - active_view->buffer->line_starts[line];
+                        active_view->cursor = { position, line, col };
+                        printf("LINE: %lld COL:%lld\n", line, col);
+                        break;
+                    }
+                    x0 += glyph->ax;
+                }
+                break;
+            }
+        }
+        free(string.data);
+
+        
+        break;
+    }
+
+    case WM_MOUSEWHEEL:
+    {
+        float delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        if (delta < 0) {
+            wheel_scroll_down();
+        } else {
+            wheel_scroll_up();
+        }
+        break;
+    }
+
     case WM_CHAR:
     {
-        printf("WM_CHAR\n");
         uint16 vk = wParam & 0x0000ffff;
         uint8 c = (uint8)vk;
         if (c == '\r') {
@@ -304,7 +427,7 @@ Face *load_font_face(const char *font_name, int font_height) {
     float descend = ft_face->size->metrics.descender / 64.f;
     float bbox_height = (float)(bbox_ymax - bbox_ymin);
     float glyph_height = (float)ft_face->size->metrics.height / 64.f;
-    float glyph_width = (float)(ft_face->bbox.xMax - ft_face->bbox.xMin) / 64.f;
+    float glyph_width = (float)(ft_face->size->metrics.max_advance) / 64.f;
 
     int atlas_width = 1; // white pixel
     int atlas_height = 0;
@@ -537,72 +660,6 @@ uint16 key_stroke_to_key(Key_Stroke *key_stroke) {
     return result;
 }
 
-COMMAND(debug_command) {
-    printf("DEBUG\n");
-}
-
-COMMAND(quit_command) {
-    printf("QUITTING\n");
-    window_should_close = true;
-}
-
-COMMAND(newline) {
-    buffer_insert(active_view->buffer, active_view->cursor.position, '\n');
-    active_view->cursor.position++;
-    active_view->cursor.col = 0;
-    active_view->cursor.line++;
-}
-
-COMMAND(self_insert) {
-    assert(active_text_input);
-    buffer_insert(active_view->buffer, active_view->cursor.position, active_text_input->text[0]);
-    active_view->cursor.col++;
-    active_view->cursor.position++;
-}
-
-COMMAND(backward_char) {
-    View *view = active_view;
-    view->cursor.col--;
-    view->cursor.position--;
-    if (view->cursor.col < 0) {
-        view->cursor.col = 0;
-        view->cursor.position++;
-    }
-}
-
-COMMAND(forward_char) {
-    View *view = active_view;
-    view->cursor.col++;
-    view->cursor.position++;
-    if (view->cursor.col >= get_line_length(view->buffer, view->cursor.line)) {
-        view->cursor.col--;
-        view->cursor.position--;
-    }
-}
-
-COMMAND(previous_line) {
-    View *view = active_view;
-    view->cursor.line = CLAMP(view->cursor.line - 1, 0, get_line_count(view->buffer) - 1);
-    view->cursor.position = view->buffer->line_starts[view->cursor.line];
-    view->cursor.col = 0;
-}
-
-COMMAND(next_line) {
-    View *view = active_view;
-    view->cursor.line = CLAMP(view->cursor.line + 1, 0, get_line_count(view->buffer) - 1);
-    view->cursor.position = view->buffer->line_starts[view->cursor.line];
-    view->cursor.col = 0;
-}
-
-COMMAND(backward_delete_char) {
-    View *view = active_view;
-    if (view->cursor.position > 0) {
-        buffer_delete(view->buffer, view->cursor.position);
-        view->cursor.position--;
-        view->cursor.col--;
-    }
-}
-
 Key_Command make_key_command(const char *name, Command_Proc procedure) {
     Key_Command command;
     command.name = name;
@@ -612,30 +669,20 @@ Key_Command make_key_command(const char *name, Command_Proc procedure) {
 
 Key_Map *default_key_map() {
     Key_Map *key_map = (Key_Map *)calloc(1, sizeof(Key_Map));
-    key_map->commands[KEYMOD_CONTROL | KEY_S] = make_key_command("debug command", debug_command);
-    key_map->commands[KEYMOD_ALT | KEY_F4] = make_key_command("quit", quit_command);
-    key_map->commands[KEY_ENTER] = make_key_command("newline", newline);
 
     Key_Command self_insert_command = make_key_command("self_insert", self_insert);
+    for (unsigned char c = 0; c < 128; c++) {
+        uint16 vk = VkKeyScanA(c);
+        vk = vk & 0x00ff; // discard high byte
+        Key_Code key = keycode_lookup[vk];
+        if (isprint(c) && key) {
+            key_map->commands[key] = self_insert_command;
+            key_map->commands[KEYMOD_SHIFT|key] = self_insert_command;
+        }
+    }
 
-    for (Key_Code key = KEY_A; key <= KEY_Z; key = (Key_Code)(key + 1)) {
-        key_map->commands[key] = self_insert_command;
-        key_map->commands[KEYMOD_SHIFT | key] = self_insert_command;
-    }
-    for (Key_Code key = KEY_0; key <= KEY_9; key = (Key_Code)(key + 1)) {
-        key_map->commands[KEYMOD_SHIFT | key] = self_insert_command;
-        key_map->commands[key] = self_insert_command;
-    }
-    key_map->commands[KEY_SPACE] = self_insert_command;
-    key_map->commands[KEY_COMMA] = self_insert_command;
-    key_map->commands[KEY_PERIOD] = self_insert_command;
-    key_map->commands[KEY_LEFT_BRACKET] = self_insert_command;
-    key_map->commands[KEY_RIGHT_BRACKET] = self_insert_command;
-    key_map->commands[KEY_SEMICOLON] = self_insert_command;
-    key_map->commands[KEY_SLASH] = self_insert_command;
-    key_map->commands[KEY_BACKSLASH] = self_insert_command;
-    key_map->commands[KEY_MINUS] = self_insert_command;
-    key_map->commands[KEY_PLUS] = self_insert_command;
+    key_map->commands[KEYMOD_ALT | KEY_F4] = make_key_command("quit", quit_qed);
+    key_map->commands[KEY_ENTER] = make_key_command("newline", newline);
 
     key_map->commands[KEY_LEFT] = make_key_command("backward_char", backward_char);
     key_map->commands[KEY_RIGHT] = make_key_command("forward_char", forward_char);
@@ -643,6 +690,7 @@ Key_Map *default_key_map() {
     key_map->commands[KEY_UP] = make_key_command("previous_line", previous_line);
     key_map->commands[KEY_DOWN] = make_key_command("next_line", next_line);
 
+    key_map->commands[KEYMOD_SHIFT | KEY_BACKSPACE] = make_key_command("backward_delete_char", backward_delete_char);
     key_map->commands[KEY_BACKSPACE] = make_key_command("backward_delete_char", backward_delete_char);
 
     return key_map;
@@ -770,7 +818,7 @@ int main(int argc, char **argv) {
     };
     Shader *simple_shader = make_shader("simple.hlsl", "vs_main", "ps_main", simple_layout, ARRAYSIZE(simple_layout));
 
-    Face *face = load_font_face("fonts/Inconsolata.ttf", 24);
+    Face *face = load_font_face("fonts/consolas.ttf", 14);
 
     ID3D11Buffer *simple_constant_buffer = make_constant_buffer(sizeof(Simple_Constants));
 
@@ -781,6 +829,7 @@ int main(int argc, char **argv) {
     active_view->buffer = make_buffer_from_file("simple.hlsl");
     active_view->cursor = {};
     active_view->face = face;
+    active_view->y_off = 0;
     
     while (!window_should_close) {
         MSG message;
@@ -812,7 +861,7 @@ int main(int argc, char **argv) {
             assert(key < MAX_KEY_COUNT);
             Key_Command *command = &active_keymap->commands[key];
             if (command->procedure) {
-                printf("executing '%s'\n", command->name);
+                // printf("executing '%s'\n", command->name);
                 command->procedure();
             }
 
