@@ -140,6 +140,9 @@ struct View {
     Buffer *buffer;
     Cursor cursor;
 
+    bool mark_active;
+    Cursor mark;
+
     int y_off;
 };
 

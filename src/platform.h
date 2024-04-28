@@ -18,4 +18,5 @@ struct File_Attributes {
 
 char *read_file_string(const char *file_name);
 Read_File read_entire_file(const char *file_name);
+Read_File open_entire_file(const char *file_name);
 File_Attributes get_file_attributes(const char *file_name);

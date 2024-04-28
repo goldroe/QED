@@ -94,6 +94,95 @@ COMMAND(forward_char) {
     }
 }
 
+COMMAND(forward_word) {
+    View *view = active_view;
+    int64 buffer_length = get_buffer_length(view->buffer);
+    char first = buffer_at(view->buffer, view->cursor.position);
+    int64 position = view->cursor.position;
+
+    // eat whitespace
+    if (isspace(first)) {
+        for (; position < buffer_length; position++) {
+            char c = buffer_at(view->buffer, position);
+            if (!isspace(c)) {
+                break;
+            }
+        }
+    }
+    for (; position < buffer_length; position++) {
+        char c = buffer_at(view->buffer, position);
+        if (isspace(c)) {
+            break;
+        }
+    }
+    view->cursor = get_cursor_from_position(view->buffer, position);
+}
+
+
+COMMAND(backward_word) {
+    View *view = active_view;
+    int64 buffer_length = get_buffer_length(view->buffer);
+    char first = buffer_at(view->buffer, view->cursor.position);
+    int64 position = view->cursor.position;
+
+    // eat whitespace
+    if (isspace(first)) {
+        for (; position >= 0; position--) {
+            char c = buffer_at(view->buffer, position);
+            if (!isspace(c)) {
+                break;
+            }
+        }
+    }
+    for (position = position - 1; position >= 0; position--) {
+        char c = buffer_at(view->buffer, position);
+        if (isspace(c)) {
+            break;
+        }
+    }
+    view->cursor = get_cursor_from_position(view->buffer, position);
+}
+
+COMMAND(backward_paragraph) {
+    View *view = active_view;
+    for (int64 line = view->cursor.line - 1; line > 0; line--) {
+        int64 start = view->buffer->line_starts[line - 1];
+        int64 end = view->buffer->line_starts[line];
+        bool blank_line = true;
+        for (int64 position = start; position < end; position++) {
+            char c = buffer_at(view->buffer, position);
+            if (!isspace(c)) {
+                blank_line = false;
+                break;
+            }
+        }
+        if (blank_line) {
+            view->cursor = get_cursor_from_position(view->buffer, start);
+            break;
+        }
+    }
+}
+
+COMMAND(forward_paragraph) {
+    View *view = active_view;
+    for (int64 line = view->cursor.line + 1; line < get_line_count(view->buffer) - 1; line++) {
+        int64 start = view->buffer->line_starts[line];
+        int64 end = view->buffer->line_starts[line + 1];
+        bool blank_line = true;
+        for (int64 position = start; position < end; position++) {
+            char c = buffer_at(view->buffer, position);
+            if (!isspace(c)) {
+                blank_line = false;
+                break;
+            }
+        }
+        if (blank_line) {
+            view->cursor = get_cursor_from_position(view->buffer, start);
+            break;
+        }
+    }    
+}
+
 COMMAND(previous_line) {
     View *view = active_view;
     if (view->cursor.line > 0) {
@@ -114,7 +203,15 @@ COMMAND(next_line) {
 
 COMMAND(backward_delete_char) {
     View *view = active_view;
-    if (view->cursor.position > 0) {
+    if (view->mark_active && (view->cursor.position != view->mark.position)) {
+        Cursor start = view->mark.position < view->cursor.position ? view->mark : view->cursor;
+        Cursor end = view->mark.position < view->cursor.position ? view->cursor : view->mark;
+        for (int64 position = start.position; position < end.position; position++) {
+            // @Todo buffer region deletion
+            buffer_delete(view->buffer, start.position);
+        }
+        // @Todo move mark
+    } else if (view->cursor.position > 0) {
         buffer_delete(view->buffer, view->cursor.position);
         Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position - 1);
         view->cursor = cursor;
@@ -122,16 +219,49 @@ COMMAND(backward_delete_char) {
 }
 
 COMMAND(wheel_scroll_up) {
-    int scroll_dt = 10;
     View *view = active_view;
-    view->y_off -= scroll_dt;
+    float delta = -2.0f * view->face->glyph_height;
+    view->y_off += (int)delta;
 }
 
 COMMAND(wheel_scroll_down) {
-    int scroll_dt = 10;
     View *view = active_view;
-    view->y_off += scroll_dt;
+    float delta = 2.0f * view->face->glyph_height;
+    view->y_off += (int)delta;
 }
+
+void write_buffer(Buffer *buffer) {
+    String buffer_string = buffer_to_string(buffer);
+    DWORD bytes_written = 0;
+    HANDLE file_handle = CreateFileA((LPCSTR)buffer->file_name, GENERIC_WRITE, 0, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file_handle == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND) {
+            file_handle = CreateFileA((LPCSTR)buffer->file_name, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        }
+    }
+
+    if (file_handle) {
+        if (WriteFile(file_handle, buffer_string.data, (DWORD)buffer_string.count, &bytes_written, NULL)) {
+        } else {
+            DWORD error = GetLastError();
+            printf("WriteFile: error writing file '%s'\n", buffer->file_name);
+        }
+        CloseHandle(file_handle);
+    }
+    free(buffer_string.data);
+}
+
+COMMAND(save_buffer) {
+    write_buffer(active_view->buffer);
+}
+
+COMMAND(set_mark) {
+    View *view = active_view;
+    view->mark_active = true;
+    view->mark = view->cursor;    
+}
+
 
 void *allocate_system_event(size_t size) {
     void *event = calloc(1, size); 
@@ -270,6 +400,37 @@ Read_File read_entire_file(const char *file_name) {
     return result;
 }
 
+Read_File open_entire_file(const char *file_name) {
+    Read_File result{};
+    HANDLE file_handle = CreateFileA((LPCSTR)file_name, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file_handle != INVALID_HANDLE_VALUE) {
+        uint64 bytes_to_read;
+        if (GetFileSizeEx(file_handle, (PLARGE_INTEGER)&bytes_to_read)) {
+            assert(bytes_to_read <= UINT32_MAX);
+            result.data = (char *)malloc(bytes_to_read);
+            DWORD bytes_read;
+            if (ReadFile(file_handle, result.data, (DWORD)bytes_to_read, &bytes_read, NULL) && (DWORD)bytes_to_read ==  bytes_read) {
+                result.count = bytes_read;
+                //result.handle = (Platform_Handle)file_handle;
+                CloseHandle(file_handle);
+                //if (SetFilePointer(file_handle, 0, 0, FILE_BEGIN) == INVALID_SET_FILE_POINTER) {
+                //    printf("SetFilePointer: error rewinding file, '%s'\n", file_name);
+                //}
+            } else {
+                // TODO: error handling
+                printf("ReadFile: error reading file, %s!\n", file_name);
+            }
+       } else {
+            // TODO: error handling
+            printf("GetFileSize: error getting size of file: %s!\n", file_name);
+       }
+    } else {
+        // TODO: error handling
+        printf("CreateFile: error opening file: %s!\n", file_name);
+    }
+    return result;
+}
+
 inline Key_Modifiers make_key_modifiers(bool shift, bool control, bool alt) {
     Key_Modifiers modifiers = KEY_MODIFIER_NONE;
     modifiers = (Key_Modifiers)((int)modifiers | (int)(shift ? (int)KEY_MODIFIER_SHIFT : 0));
@@ -336,7 +497,6 @@ LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) 
                     if (x0 <= x && x <= x1) {
                         int64 col = position - active_view->buffer->line_starts[line];
                         active_view->cursor = { position, line, col };
-                        printf("LINE: %lld COL:%lld\n", line, col);
                         break;
                     }
                     x0 += glyph->ax;
@@ -693,12 +853,32 @@ Key_Map *default_key_map() {
     key_map->commands[KEYMOD_SHIFT | KEY_BACKSPACE] = make_key_command("backward_delete_char", backward_delete_char);
     key_map->commands[KEY_BACKSPACE] = make_key_command("backward_delete_char", backward_delete_char);
 
+    key_map->commands[KEYMOD_CONTROL | KEY_ENTER] = make_key_command("save_buffer", save_buffer);
+
+    key_map->commands[KEYMOD_CONTROL | KEY_LEFT] = make_key_command("backward_word", backward_word);
+    key_map->commands[KEYMOD_CONTROL | KEY_RIGHT] = make_key_command("forward_word", forward_word);
+
+    key_map->commands[KEYMOD_CONTROL | KEY_UP] = make_key_command("backward_paragraph", backward_paragraph);
+    key_map->commands[KEYMOD_CONTROL | KEY_DOWN] = make_key_command("forward_paragraph", forward_paragraph);
+
+    key_map->commands[KEYMOD_CONTROL | KEY_SPACE] = make_key_command("set_mark", set_mark);
     return key_map;
 }
 
 int main(int argc, char **argv) {
     // UINT desired_scheduler_ms = 1;
     // timeBeginPeriod(desired_scheduler_ms);
+
+    argc--;
+    argv++;
+    if (argc == 0) {
+        puts("QED");
+        puts("Usage: Qed [filename]");
+        exit(0);
+    }
+
+
+    char *file_name = argv[0];
 
     win32_keycodes_init();
 
@@ -818,7 +998,7 @@ int main(int argc, char **argv) {
     };
     Shader *simple_shader = make_shader("simple.hlsl", "vs_main", "ps_main", simple_layout, ARRAYSIZE(simple_layout));
 
-    Face *face = load_font_face("fonts/consolas.ttf", 14);
+    Face *face = load_font_face("fonts/consolas.ttf", 20);
 
     ID3D11Buffer *simple_constant_buffer = make_constant_buffer(sizeof(Simple_Constants));
 
@@ -826,7 +1006,7 @@ int main(int argc, char **argv) {
 
     active_view = new View();
     active_view->rect = { 0.0f, 0.0f, (float)WIDTH, (float)HEIGHT };
-    active_view->buffer = make_buffer_from_file("simple.hlsl");
+    active_view->buffer = make_buffer_from_file(file_name);
     active_view->cursor = {};
     active_view->face = face;
     active_view->y_off = 0;

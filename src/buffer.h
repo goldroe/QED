@@ -14,7 +14,6 @@ struct Buffer {
 
     Array<int64> line_starts;
 
-    Platform_Handle file_handle;
     int64 last_write_time;
 };
 
@@ -26,3 +25,4 @@ int64 get_line_count(Buffer *buffer);
 Cursor get_cursor_from_position(Buffer *buffer, int64 position);
 int64 get_position_from_line(Buffer *buffer, int64 line);
 int64 get_buffer_length(Buffer *buffer);
+char buffer_at(Buffer *buffer, int64 position);

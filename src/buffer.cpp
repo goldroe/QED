@@ -56,7 +56,7 @@ void remove_crlf(char *data, int64 count, char **out_data, int64 *out_count) {
 }
 
 Buffer *make_buffer_from_file(const char *file_name) {
-    Read_File file = read_entire_file(file_name);
+    Read_File file = open_entire_file(file_name);
     assert(file.data);
     char *lf_string = nullptr;
     int64 lf_count = 0;
@@ -68,7 +68,6 @@ Buffer *make_buffer_from_file(const char *file_name) {
     buffer->gap_end = 0;
     buffer->size = lf_count;
     buffer_update_line_starts(buffer);
-    buffer->file_handle = file.handle;
     File_Attributes attribs = get_file_attributes(file_name);
     buffer->last_write_time = attribs.last_write_time;
     free(file.data);
@@ -82,13 +81,22 @@ int64 buffer_position_logical(Buffer *buffer, int64 position) {
     return position;
 }
 
+char buffer_at(Buffer *buffer, int64 position) {
+    int64 index = position;
+    if (index >= buffer->gap_start) {
+        index += GAP_SIZE(buffer);
+    }
+    char c = buffer->text[index];
+    return c;
+}
+
 void buffer_update_line_starts(Buffer *buffer) {
     buffer->line_starts.reset_count();
     buffer->line_starts.push(0);
     
     char *text = buffer->text;
     for (;;) {
-        if (text > buffer->text + buffer->size) break;
+        if (text >= buffer->text + buffer->size) break;
         if (PTR_IN_GAP(text, buffer)) {
             text = buffer->text + buffer->gap_end;
             continue;

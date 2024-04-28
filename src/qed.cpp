@@ -82,13 +82,71 @@ void draw_view(View *view) {
     v4 bg_color = V4(0.12f, 0.12f, 0.12f, 1.0f);
     v4 text_color = V4(0.73f, 0.69f, 0.72f, 1.0f);
     v4 cursor_color = V4(1.0f, 1.0f, 1.0f, 1.0f);
+    v4 hl_color = V4(0.68f, 0.86f, 0.92f, 1.0f);
     bg_color = V4(1.0f, 1.0f, 1.0f, 1.0f);
     text_color = V4(0.12f, 0.12f, 0.12f, 1.0f);
     cursor_color = V4(0.0f, 0.0f, 0.0f, 0.8f);
 
     draw_rectangle(view->rect, bg_color);
 
-    int64 count = view->buffer->size - (view->buffer->gap_end - view->buffer->gap_start);
+    if (view->mark_active) {
+        Cursor start = view->mark;
+        Cursor end = view->cursor;
+        if (start.position > end.position) {
+            Cursor temp = start;
+            start = end;
+            end = temp;
+        }
+
+        float line_height = view->face->glyph_height;
+
+        float line_x = 0.0f;
+        float line_y = line_height * start.line - view->y_off;
+
+        // draw first line
+        int64 line_end = view->buffer->line_starts[start.line + 1];
+        float line_width = 0.0f;
+        for (int64 p = view->buffer->line_starts[start.line]; p < start.position; p++) {
+            char c = buffer_at(view->buffer, p);
+            Glyph *g = &view->face->glyphs[c];
+            line_x += g->ax;
+        }
+        if (start.line < end.line) {
+            for (int64 position = start.position ; position < line_end; position++) {
+                char c = buffer_at(view->buffer, position);
+                Glyph *g = &view->face->glyphs[c];
+                line_width += g->ax;
+            }
+            Rect line_rect = { line_x, line_y, line_x + line_width, line_y + line_height };
+            draw_rectangle(line_rect, hl_color);
+        }
+
+        // draw whole lines
+        for (int64 line = start.line + 1; line < end.line; line++) {
+            line_width = 0.0f;
+            line_y = line_height * line - view->y_off;
+            line_end = view->buffer->line_starts[line + 1];
+            for (int64 position = view->buffer->line_starts[line]; position < line_end; position++) {
+                char c = buffer_at(view->buffer, position);
+                Glyph *g = &view->face->glyphs[c];
+                line_width += g->ax;
+            }
+            Rect line_rect = { 0.0f, line_y, line_width, line_y + line_height };
+            draw_rectangle(line_rect, hl_color);
+        }
+
+        // draw remainder line
+        line_width = 0.0f;
+        line_y = line_height * end.line - view->y_off;
+        for (int64 position = view->buffer->line_starts[end.line]; position < end.position; position++) {
+            char c = buffer_at(view->buffer, position);
+            Glyph *g = &view->face->glyphs[c];
+            line_width += g->ax;
+        }
+        Rect line_rect = { 0.0f, line_y, line_width, line_y + line_height };
+        draw_rectangle(line_rect, hl_color);
+    }
+
     String buffer_string = buffer_to_string(view->buffer);
 
     draw_string(view->face, V2(0.0f, (float)view->y_off), buffer_string.data, buffer_string.count, text_color);
