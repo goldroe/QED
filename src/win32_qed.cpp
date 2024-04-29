@@ -58,10 +58,12 @@ struct Shader {
     ID3D11PixelShader *pixel_shader;
 };
 
-
-
 COMMAND(quit_qed) {
     window_should_close = true;
+}
+
+COMMAND(quit_selection) {
+    active_view->mark_active = false;
 }
 
 COMMAND(newline) {
@@ -72,10 +74,23 @@ COMMAND(newline) {
 }
 
 COMMAND(self_insert) {
-    assert(active_text_input);
-    buffer_insert(active_view->buffer, active_view->cursor.position, active_text_input->text[0]);
-    active_view->cursor.col++;
-    active_view->cursor.position++;
+    View *view = active_view;
+    if (active_text_input) {
+        if (view->mark_active) {
+            String string = { active_text_input->text, 1 };
+            int64 start = view->cursor.position < view->mark.position ? view->cursor.position : view->mark.position;
+            int64 end = view->cursor.position < view->mark.position ? view->mark.position : view->cursor.position;
+            buffer_replace_region(view->buffer, string, start, end);
+            view->mark_active = false;
+            view->cursor = get_cursor_from_position(view->buffer, start);
+        } else {
+            buffer_insert(view->buffer, view->cursor.position, active_text_input->text[0]);
+            view->cursor.col++;
+            view->cursor.position++;
+        }
+    } else {
+        assert(false);
+    }
 }
 
 COMMAND(backward_char) {
@@ -99,7 +114,6 @@ COMMAND(forward_word) {
     int64 buffer_length = get_buffer_length(view->buffer);
     char first = buffer_at(view->buffer, view->cursor.position);
     int64 position = view->cursor.position;
-
     // eat whitespace
     if (isspace(first)) {
         for (; position < buffer_length; position++) {
@@ -118,13 +132,11 @@ COMMAND(forward_word) {
     view->cursor = get_cursor_from_position(view->buffer, position);
 }
 
-
 COMMAND(backward_word) {
     View *view = active_view;
     int64 buffer_length = get_buffer_length(view->buffer);
     char first = buffer_at(view->buffer, view->cursor.position);
     int64 position = view->cursor.position;
-
     // eat whitespace
     if (isspace(first)) {
         for (; position >= 0; position--) {
@@ -203,19 +215,90 @@ COMMAND(next_line) {
 
 COMMAND(backward_delete_char) {
     View *view = active_view;
-    if (view->mark_active && (view->cursor.position != view->mark.position)) {
-        Cursor start = view->mark.position < view->cursor.position ? view->mark : view->cursor;
-        Cursor end = view->mark.position < view->cursor.position ? view->cursor : view->mark;
-        for (int64 position = start.position; position < end.position; position++) {
-            // @Todo buffer region deletion
-            buffer_delete(view->buffer, start.position);
+    if (view->mark_active) {
+        if (view->cursor.position != view->mark.position) {
+            Cursor start = view->mark.position < view->cursor.position ? view->mark : view->cursor;
+            Cursor end = view->mark.position < view->cursor.position ? view->cursor : view->mark;
+            buffer_delete_region(view->buffer, start.position, end.position);
+            view->cursor = get_cursor_from_position(view->buffer, start.position);
         }
-        // @Todo move mark
+        view->mark_active = false;
     } else if (view->cursor.position > 0) {
-        buffer_delete(view->buffer, view->cursor.position);
+        buffer_delete_single(view->buffer, view->cursor.position);
         Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position - 1);
         view->cursor = cursor;
     }
+}
+
+COMMAND(forward_delete_char) {
+    View *view = active_view;
+    if (view->mark_active) {
+        if (view->cursor.position != view->mark.position) {
+            Cursor start = view->mark.position < view->cursor.position ? view->mark : view->cursor;
+            Cursor end = view->mark.position < view->cursor.position ? view->cursor : view->mark;
+            buffer_delete_region(view->buffer, start.position, end.position);
+            view->cursor = get_cursor_from_position(view->buffer, start.position);
+        }
+        view->mark_active = false;
+    } else if (view->cursor.position < get_buffer_length(view->buffer)) {
+        buffer_delete_single(view->buffer, view->cursor.position + 1);
+        Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position);
+        view->cursor = cursor;
+    }
+}
+
+COMMAND(backward_delete_word) {
+    View *view = active_view;
+    int64 buffer_length = get_buffer_length(view->buffer);
+    char first = buffer_at(view->buffer, view->cursor.position);
+    int64 position = view->cursor.position;
+    // eat whitespace
+    if (isspace(first)) {
+        for (; position >= 0; position--) {
+            char c = buffer_at(view->buffer, position);
+            if (!isspace(c)) {
+                break;
+            }
+        }
+    }
+    for (position = position - 1; position >= 0; position--) {
+        char c = buffer_at(view->buffer, position);
+        if (isspace(c)) {
+            break;
+        }
+    }
+
+    position = CLAMP(position, 0, buffer_length);
+
+    buffer_delete_region(view->buffer, position, view->cursor.position);
+    view->cursor = get_cursor_from_position(view->buffer, position);
+}
+
+COMMAND(forward_delete_word) {
+    View *view = active_view;
+    int64 buffer_length = get_buffer_length(view->buffer);
+    char first = buffer_at(view->buffer, view->cursor.position);
+    int64 position = view->cursor.position;
+    // eat whitespace
+    if (isspace(first)) {
+        for (; position < buffer_length; position++) {
+            char c = buffer_at(view->buffer, position);
+            if (!isspace(c)) {
+                break;
+            }
+        }
+    }
+    for (; position < buffer_length; position++) {
+        char c = buffer_at(view->buffer, position);
+        if (isspace(c)) {
+            break;
+        }
+    }
+
+    position = CLAMP(position, 0, buffer_length);
+
+    buffer_delete_region(view->buffer, view->cursor.position, position);
+    view->cursor = get_cursor_from_position(view->buffer, view->cursor.position);
 }
 
 COMMAND(wheel_scroll_up) {
@@ -228,6 +311,50 @@ COMMAND(wheel_scroll_down) {
     View *view = active_view;
     float delta = 2.0f * view->face->glyph_height;
     view->y_off += (int)delta;
+}
+
+float rect_width(Rect rect) {
+    float result;
+    result = rect.x1 - rect.x0;
+    return result;
+}
+
+float rect_height(Rect rect) {
+    float result;
+    result = rect.y1 - rect.y0;
+    return result;
+}
+
+COMMAND(scroll_page_up) {
+    View *view = active_view;
+    int lines_per_page = (int)(rect_height(view->rect) / view->face->glyph_height);
+    int page_line = (int)(view->y_off / view->face->glyph_height);
+    float cursor_y = view->face->glyph_height * view->cursor.line;
+    int lines_from_top = (int)(((cursor_y  + view->face->glyph_height) - view->y_off) / view->face->glyph_height);
+
+    int64 line = view->cursor.line - lines_from_top;
+    line = CLAMP(line, 0, get_line_count(view->buffer) - 1);
+
+    view->y_off = (int)((line - lines_per_page + 1) * view->face->glyph_height);
+    view->y_off = view->y_off < 0 ? 0 : view->y_off;
+    view->cursor = get_cursor_from_line(view->buffer, line);
+}
+
+COMMAND(scroll_page_down) {
+    View *view = active_view;
+    float cursor_y = view->face->glyph_height * view->cursor.line;
+
+    // @todo "view" space
+    int lines_from_bottom = (int)((view->rect.y1 - cursor_y) / view->face->glyph_height);
+    printf("%d\n", lines_from_bottom);
+
+    int64 line = view->cursor.line + lines_from_bottom;
+    line = CLAMP(line, 0, get_line_count(view->buffer) - 1);
+
+    view->y_off = (int)(line * view->face->glyph_height);
+    int max_y_off = (int)((get_line_count(view->buffer) - 4) * view->face->glyph_height);
+    view->y_off = view->y_off > max_y_off ? max_y_off : view->y_off;
+    view->cursor = get_cursor_from_line(view->buffer, line);
 }
 
 void write_buffer(Buffer *buffer) {
@@ -262,6 +389,27 @@ COMMAND(set_mark) {
     view->mark = view->cursor;    
 }
 
+COMMAND(goto_beginning_of_line) {
+    View *view = active_view;
+    int64 position = get_position_from_line(view->buffer, view->cursor.line);
+    view->cursor = get_cursor_from_position(view->buffer, position);
+}
+
+COMMAND(goto_end_of_line) {
+    View *view = active_view;
+    int64 position = get_position_from_line(view->buffer, view->cursor.line) + get_line_length(view->buffer, view->cursor.line);
+    view->cursor = get_cursor_from_position(view->buffer, position);
+}
+
+COMMAND(goto_first_line) {
+    View *view = active_view;
+    view->cursor = get_cursor_from_position(view->buffer, 0);
+}
+
+COMMAND(goto_last_line) {
+    View *view = active_view;
+    view->cursor = get_cursor_from_position(view->buffer, view->buffer->size - (view->buffer->gap_end - view->buffer->gap_start));
+}
 
 void *allocate_system_event(size_t size) {
     void *event = calloc(1, size); 
@@ -301,17 +449,24 @@ void win32_keycodes_init() {
         keycode_lookup['0' + i] = (Key_Code)(KEY_0 + i);
     }
 
+    keycode_lookup[VK_HOME] = KEY_HOME;
+    keycode_lookup[VK_END] = KEY_END;
+
     keycode_lookup[VK_SPACE] = KEY_SPACE;
     keycode_lookup[VK_OEM_COMMA] = KEY_COMMA;
     keycode_lookup[VK_OEM_PERIOD] = KEY_PERIOD;
 
     keycode_lookup[VK_RETURN] = KEY_ENTER;
     keycode_lookup[VK_BACK] = KEY_BACKSPACE;
-    
+    keycode_lookup[VK_DELETE] = KEY_DELETE;
+
     keycode_lookup[VK_LEFT] = KEY_LEFT;
     keycode_lookup[VK_RIGHT] = KEY_RIGHT;
     keycode_lookup[VK_UP] = KEY_UP;
     keycode_lookup[VK_DOWN] = KEY_DOWN;
+
+    keycode_lookup[VK_PRIOR] = KEY_PAGEUP;
+    keycode_lookup[VK_NEXT] = KEY_PAGEDOWN;
 
     keycode_lookup[VK_OEM_4] = KEY_LEFT_BRACKET;
     keycode_lookup[VK_OEM_6] = KEY_RIGHT_BRACKET;
@@ -390,6 +545,7 @@ Read_File read_entire_file(const char *file_name) {
                 printf("ReadFile: error reading file, %s!\n", file_name);
             }
        } else {
+
             // TODO: error handling
             printf("GetFileSize: error getting size of file: %s!\n", file_name);
        }
@@ -475,7 +631,7 @@ LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) 
         break;
     }
 
-    case WM_LBUTTONUP:
+    // case WM_LBUTTONUP:
     case WM_LBUTTONDOWN:
     {
         int x = GET_X_LPARAM(lParam); 
@@ -505,8 +661,6 @@ LRESULT CALLBACK window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) 
             }
         }
         free(string.data);
-
-        
         break;
     }
 
@@ -804,7 +958,6 @@ Shader *make_shader(const char *file_name, const char *vs_entry, const char *ps_
         // assert(hr == S_OK);
     }
 
-
     if (vertex_error_blob) vertex_error_blob->Release();
     if (pixel_error_blob)  pixel_error_blob->Release();
     if (vertex_blob) vertex_blob->Release();
@@ -827,6 +980,10 @@ Key_Command make_key_command(const char *name, Command_Proc procedure) {
     return command;
 }
 
+void set_key_command(Key_Map *key_map, uint16 key, Key_Command command) {
+    key_map->commands[key] = command;
+}
+
 Key_Map *default_key_map() {
     Key_Map *key_map = (Key_Map *)calloc(1, sizeof(Key_Map));
 
@@ -841,34 +998,52 @@ Key_Map *default_key_map() {
         }
     }
 
-    key_map->commands[KEYMOD_ALT | KEY_F4] = make_key_command("quit", quit_qed);
-    key_map->commands[KEY_ENTER] = make_key_command("newline", newline);
+    // Default keybindings
+    set_key_command(key_map, KEYMOD_ALT | KEY_F4, make_key_command("quit", quit_qed));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_S, make_key_command("save_buffer", save_buffer));
 
-    key_map->commands[KEY_LEFT] = make_key_command("backward_char", backward_char);
-    key_map->commands[KEY_RIGHT] = make_key_command("forward_char", forward_char);
+    set_key_command(key_map, KEY_LEFT, make_key_command("backward_char", backward_char));
+    set_key_command(key_map, KEY_RIGHT, make_key_command("forward_char", forward_char));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_LEFT, make_key_command("backward_word", backward_word));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_RIGHT, make_key_command("forward_word", forward_word));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_UP, make_key_command("backward_paragraph", backward_paragraph));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_DOWN, make_key_command("forward_paragraph", forward_paragraph));
+    set_key_command(key_map, KEY_UP, make_key_command("previous_line", previous_line));
+    set_key_command(key_map, KEY_DOWN, make_key_command("next_line", next_line));
 
-    key_map->commands[KEY_UP] = make_key_command("previous_line", previous_line);
-    key_map->commands[KEY_DOWN] = make_key_command("next_line", next_line);
+    set_key_command(key_map, KEYMOD_SHIFT | KEY_BACKSPACE, make_key_command("backward_delete_char", backward_delete_char));
+    set_key_command(key_map, KEY_BACKSPACE, make_key_command("backward_delete_char", backward_delete_char));
+    set_key_command(key_map, KEYMOD_SHIFT | KEY_DELETE, make_key_command("forward_delete_char", forward_delete_char));
+    set_key_command(key_map, KEY_DELETE, make_key_command("forward_delete_char", forward_delete_char));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_BACKSPACE, make_key_command("backward_delete_word", backward_delete_word));
+    set_key_command(key_map, KEYMOD_CONTROL | KEYMOD_SHIFT | KEY_BACKSPACE, make_key_command("backward_delete_word", backward_delete_word));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_DELETE, make_key_command("forward_delete_word", forward_delete_word));
+    set_key_command(key_map, KEYMOD_CONTROL | KEYMOD_SHIFT | KEY_DELETE, make_key_command("forward_delete_word", forward_delete_word));
 
-    key_map->commands[KEYMOD_SHIFT | KEY_BACKSPACE] = make_key_command("backward_delete_char", backward_delete_char);
-    key_map->commands[KEY_BACKSPACE] = make_key_command("backward_delete_char", backward_delete_char);
+    set_key_command(key_map, KEY_HOME, make_key_command("goto_beginning_of_line", goto_beginning_of_line));
+    set_key_command(key_map, KEY_END, make_key_command("goto_end_of_line", goto_end_of_line));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_HOME, make_key_command("goto_first_line", goto_first_line));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_END, make_key_command("goto_last_line", goto_last_line));
 
-    key_map->commands[KEYMOD_CONTROL | KEY_ENTER] = make_key_command("save_buffer", save_buffer);
+    set_key_command(key_map, KEY_ENTER, make_key_command("newline", newline));
 
-    key_map->commands[KEYMOD_CONTROL | KEY_LEFT] = make_key_command("backward_word", backward_word);
-    key_map->commands[KEYMOD_CONTROL | KEY_RIGHT] = make_key_command("forward_word", forward_word);
+    set_key_command(key_map, KEY_PAGEUP, make_key_command("scroll_page_up", scroll_page_up));
+    set_key_command(key_map, KEY_PAGEDOWN, make_key_command("scroll_page_down", scroll_page_down));
 
-    key_map->commands[KEYMOD_CONTROL | KEY_UP] = make_key_command("backward_paragraph", backward_paragraph);
-    key_map->commands[KEYMOD_CONTROL | KEY_DOWN] = make_key_command("forward_paragraph", forward_paragraph);
+    // Emacs keybindings
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_J, make_key_command("newline", newline));
 
-    key_map->commands[KEYMOD_CONTROL | KEY_SPACE] = make_key_command("set_mark", set_mark);
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_A, make_key_command("goto_beginning_of_line", goto_beginning_of_line));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_E, make_key_command("goto_end_of_line", goto_end_of_line));
+
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_SPACE, make_key_command("set_mark", set_mark));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_G, make_key_command("quit_selection", quit_selection));
     return key_map;
 }
 
 int main(int argc, char **argv) {
     // UINT desired_scheduler_ms = 1;
     // timeBeginPeriod(desired_scheduler_ms);
-
     argc--;
     argv++;
     if (argc == 0) {
@@ -876,7 +1051,6 @@ int main(int argc, char **argv) {
         puts("Usage: Qed [filename]");
         exit(0);
     }
-
 
     char *file_name = argv[0];
 
@@ -1035,7 +1209,6 @@ int main(int argc, char **argv) {
         }
         system_events.reset_count();
 
-
         if (active_key_stroke) {
             uint16 key = key_stroke_to_key(active_key_stroke);
             assert(key < MAX_KEY_COUNT);
@@ -1092,8 +1265,7 @@ int main(int argc, char **argv) {
 
         UINT stride = sizeof(Vertex), offset = 0;
         d3d11_context->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset);
-
-
+        
         simple_constants.transform = projection;
         upload_constants(simple_constant_buffer, &simple_constants, sizeof(Simple_Constants));
 
