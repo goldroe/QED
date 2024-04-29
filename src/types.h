@@ -24,3 +24,8 @@ struct Cursor {
     int64 line;
     int64 col;
 };
+
+struct String {
+    char *data;
+    int64 count;
+};

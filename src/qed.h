@@ -68,6 +68,7 @@ enum Key_Code {
 
     KEY_ENTER,
     KEY_BACKSPACE,
+    KEY_DELETE,
     KEY_LEFT,
     KEY_RIGHT,
     KEY_UP,
@@ -201,11 +202,6 @@ struct Vertex {
 
 struct Simple_Constants {
     m4 transform;
-};
-
-struct String {
-    char *data;
-    int64 count;
 };
 
 void draw_view(View *view);
