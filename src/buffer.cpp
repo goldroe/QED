@@ -1,4 +1,5 @@
 #include "buffer.h"
+#include "types.h"
 #include "platform.h"
 
 #include <stdio.h>
@@ -12,7 +13,7 @@
 void buffer_update_line_starts(Buffer *buffer);
 
 int64 get_line_length(Buffer *buffer, int64 line) {
-    int64 length = buffer->line_starts[line + 1] - buffer->line_starts[line];
+    int64 length = buffer->line_starts[line + 1] - buffer->line_starts[line] - 1;
     return length;
 }
 
@@ -86,7 +87,10 @@ char buffer_at(Buffer *buffer, int64 position) {
     if (index >= buffer->gap_start) {
         index += GAP_SIZE(buffer);
     }
-    char c = buffer->text[index];
+    char c = 0;
+    if (get_buffer_length(buffer) > 0) {
+       c = buffer->text[index]; 
+    }
     return c;
 }
 
@@ -176,6 +180,20 @@ void buffer_ensure_gap(Buffer *buffer) {
     }
 }
 
+void buffer_delete_region(Buffer *buffer, int64 start, int64 end) {
+    assert(start < end);
+    if (buffer->gap_start != start) {
+        buffer_shift_gap(buffer, start);
+    }
+
+    buffer->gap_end += (end - start);
+    buffer_update_line_starts(buffer);
+}
+
+void buffer_delete_single(Buffer *buffer, int64 position) {
+    buffer_delete_region(buffer, position - 1, position);
+}
+
 void buffer_insert(Buffer *buffer, int64 position, char c) {
     buffer_ensure_gap(buffer);
     if (buffer->gap_start != position) {
@@ -187,12 +205,15 @@ void buffer_insert(Buffer *buffer, int64 position, char c) {
     buffer_update_line_starts(buffer);
 }
 
-void buffer_delete(Buffer *buffer, int64 position) {
-    if (buffer->gap_start != position) {
-        buffer_shift_gap(buffer, position);
+void buffer_replace_region(Buffer *buffer, String string, int64 start, int64 end) {
+    int64 region_size = end - start;
+    buffer_delete_region(buffer, start, end);
+    if (GAP_SIZE(buffer) < string.count) {
+        buffer_grow(buffer, string.count);
     }
 
-    buffer->gap_start--;
+    memcpy(buffer->text + buffer->gap_start, string.data, string.count);
+    buffer->gap_start += string.count;
     buffer_update_line_starts(buffer);
 }
 
@@ -214,5 +235,11 @@ Cursor get_cursor_from_position(Buffer *buffer, int64 position) {
 int64 get_position_from_line(Buffer *buffer, int64 line) {
     int64 position = buffer->line_starts[line];
     return position;
+}
+
+Cursor get_cursor_from_line(Buffer *buffer, int64 line) {
+    int64 position = get_position_from_line(buffer, line);
+    Cursor cursor = get_cursor_from_position(buffer, position);
+    return cursor;
 }
 
