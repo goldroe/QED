@@ -58,6 +58,35 @@ struct Shader {
     ID3D11PixelShader *pixel_shader;
 };
 
+float rect_width(Rect rect) {
+    float result;
+    result = rect.x1 - rect.x0;
+    return result;
+}
+
+float rect_height(Rect rect) {
+    float result;
+    result = rect.y1 - rect.y0;
+    return result;
+}
+
+// @todo add options for adjusting view focus (top, center, bottom)
+void ensure_cursor_in_view(View *view, Cursor cursor) {
+    float cursor_top = cursor.line * view->face->glyph_height - view->y_off;
+    float cursor_bottom = cursor_top + view->face->glyph_height;
+    if (cursor_top < 0) {
+        view->y_off += (int)cursor_top;
+    } else if (cursor_bottom >= rect_height(view->rect)) {
+        float d = cursor_bottom - rect_height(view->rect);
+        view->y_off += (int)d;
+    }
+}
+
+void view_set_cursor(View *view, Cursor cursor) {
+    ensure_cursor_in_view(view, cursor);
+    view->cursor = cursor;
+}
+
 COMMAND(quit_qed) {
     window_should_close = true;
 }
@@ -67,10 +96,13 @@ COMMAND(quit_selection) {
 }
 
 COMMAND(newline) {
-    buffer_insert(active_view->buffer, active_view->cursor.position, '\n');
-    active_view->cursor.position++;
-    active_view->cursor.col = 0;
-    active_view->cursor.line++;
+    View *view = active_view;
+    Cursor cursor = view->cursor;
+    buffer_insert(view->buffer, cursor.position, '\n');
+    cursor.position++;
+    cursor.col = 0;
+    cursor.line++;
+    view_set_cursor(view, cursor);
 }
 
 COMMAND(self_insert) {
@@ -82,11 +114,10 @@ COMMAND(self_insert) {
             int64 end = view->cursor.position < view->mark.position ? view->mark.position : view->cursor.position;
             buffer_replace_region(view->buffer, string, start, end);
             view->mark_active = false;
-            view->cursor = get_cursor_from_position(view->buffer, start);
+            view_set_cursor(view, get_cursor_from_position(view->buffer, start));
         } else {
             buffer_insert(view->buffer, view->cursor.position, active_text_input->text[0]);
-            view->cursor.col++;
-            view->cursor.position++;
+            view_set_cursor(view, get_cursor_from_position(view->buffer, view->cursor.position + 1));
         }
     } else {
         assert(false);
@@ -97,7 +128,7 @@ COMMAND(backward_char) {
     View *view = active_view;
     if (view->cursor.position > 0) {
         Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position - 1);
-        view->cursor = cursor;
+        view_set_cursor(view, cursor);
     }
 }
 
@@ -105,7 +136,7 @@ COMMAND(forward_char) {
     View *view = active_view;
     if (view->cursor.position < get_buffer_length(view->buffer)) {
         Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position + 1);
-        view->cursor = cursor;
+        view_set_cursor(view, cursor);
     }
 }
 
@@ -129,7 +160,8 @@ COMMAND(forward_word) {
             break;
         }
     }
-    view->cursor = get_cursor_from_position(view->buffer, position);
+
+    view_set_cursor(view, get_cursor_from_position(view->buffer, position));
 }
 
 COMMAND(backward_word) {
@@ -152,7 +184,7 @@ COMMAND(backward_word) {
             break;
         }
     }
-    view->cursor = get_cursor_from_position(view->buffer, position);
+    view_set_cursor(view, get_cursor_from_position(view->buffer, position));
 }
 
 COMMAND(backward_paragraph) {
@@ -169,7 +201,7 @@ COMMAND(backward_paragraph) {
             }
         }
         if (blank_line) {
-            view->cursor = get_cursor_from_position(view->buffer, start);
+            view_set_cursor(view, get_cursor_from_position(view->buffer, start));
             break;
         }
     }
@@ -189,7 +221,7 @@ COMMAND(forward_paragraph) {
             }
         }
         if (blank_line) {
-            view->cursor = get_cursor_from_position(view->buffer, start);
+            view_set_cursor(view, get_cursor_from_position(view->buffer, start));
             break;
         }
     }    
@@ -200,7 +232,7 @@ COMMAND(previous_line) {
     if (view->cursor.line > 0) {
         int64 position = get_position_from_line(view->buffer, view->cursor.line - 1);
         Cursor cursor = get_cursor_from_position(view->buffer, position);
-        view->cursor = cursor;
+        view_set_cursor(view, cursor);
     }
 }
 
@@ -209,7 +241,7 @@ COMMAND(next_line) {
     if (view->cursor.line < get_line_count(view->buffer) - 1) {
         int64 position = get_position_from_line(view->buffer, view->cursor.line + 1);
         Cursor cursor = get_cursor_from_position(view->buffer, position);
-        view->cursor = cursor;
+        view_set_cursor(view, cursor);
     }
 }
 
@@ -220,13 +252,13 @@ COMMAND(backward_delete_char) {
             Cursor start = view->mark.position < view->cursor.position ? view->mark : view->cursor;
             Cursor end = view->mark.position < view->cursor.position ? view->cursor : view->mark;
             buffer_delete_region(view->buffer, start.position, end.position);
-            view->cursor = get_cursor_from_position(view->buffer, start.position);
+            view_set_cursor(view, get_cursor_from_position(view->buffer, start.position));
         }
         view->mark_active = false;
     } else if (view->cursor.position > 0) {
         buffer_delete_single(view->buffer, view->cursor.position);
         Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position - 1);
-        view->cursor = cursor;
+        view_set_cursor(view, cursor);
     }
 }
 
@@ -237,13 +269,13 @@ COMMAND(forward_delete_char) {
             Cursor start = view->mark.position < view->cursor.position ? view->mark : view->cursor;
             Cursor end = view->mark.position < view->cursor.position ? view->cursor : view->mark;
             buffer_delete_region(view->buffer, start.position, end.position);
-            view->cursor = get_cursor_from_position(view->buffer, start.position);
+            view_set_cursor(view, get_cursor_from_position(view->buffer, start.position));
         }
         view->mark_active = false;
     } else if (view->cursor.position < get_buffer_length(view->buffer)) {
         buffer_delete_single(view->buffer, view->cursor.position + 1);
         Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position);
-        view->cursor = cursor;
+        view_set_cursor(view, cursor);
     }
 }
 
@@ -271,7 +303,7 @@ COMMAND(backward_delete_word) {
     position = CLAMP(position, 0, buffer_length);
 
     buffer_delete_region(view->buffer, position, view->cursor.position);
-    view->cursor = get_cursor_from_position(view->buffer, position);
+    view_set_cursor(view, get_cursor_from_position(view->buffer, position));
 }
 
 COMMAND(forward_delete_word) {
@@ -298,9 +330,10 @@ COMMAND(forward_delete_word) {
     position = CLAMP(position, 0, buffer_length);
 
     buffer_delete_region(view->buffer, view->cursor.position, position);
-    view->cursor = get_cursor_from_position(view->buffer, view->cursor.position);
+    view_set_cursor(view, get_cursor_from_position(view->buffer, view->cursor.position));
 }
 
+// @todo scroll ensure cursor keeps up
 COMMAND(wheel_scroll_up) {
     View *view = active_view;
     float delta = -2.0f * view->face->glyph_height;
@@ -313,48 +346,33 @@ COMMAND(wheel_scroll_down) {
     view->y_off += (int)delta;
 }
 
-float rect_width(Rect rect) {
-    float result;
-    result = rect.x1 - rect.x0;
-    return result;
-}
-
-float rect_height(Rect rect) {
-    float result;
-    result = rect.y1 - rect.y0;
-    return result;
-}
-
 COMMAND(scroll_page_up) {
     View *view = active_view;
     int lines_per_page = (int)(rect_height(view->rect) / view->face->glyph_height);
     int page_line = (int)(view->y_off / view->face->glyph_height);
-    float cursor_y = view->face->glyph_height * view->cursor.line;
-    int lines_from_top = (int)(((cursor_y  + view->face->glyph_height) - view->y_off) / view->face->glyph_height);
+    float cursor_y = view->face->glyph_height * view->cursor.line - view->y_off;
+    int lines_from_top = (int)(cursor_y / view->face->glyph_height);
 
     int64 line = view->cursor.line - lines_from_top;
     line = CLAMP(line, 0, get_line_count(view->buffer) - 1);
 
-    view->y_off = (int)((line - lines_per_page + 1) * view->face->glyph_height);
+    view->y_off = (int)((line - lines_per_page) * view->face->glyph_height);
     view->y_off = view->y_off < 0 ? 0 : view->y_off;
-    view->cursor = get_cursor_from_line(view->buffer, line);
+    view_set_cursor(view, get_cursor_from_line(view->buffer, line));
 }
 
 COMMAND(scroll_page_down) {
     View *view = active_view;
-    float cursor_y = view->face->glyph_height * view->cursor.line;
+    float cursor_y = view->face->glyph_height * view->cursor.line - view->y_off;
 
-    // @todo "view" space
-    int lines_from_bottom = (int)((view->rect.y1 - cursor_y) / view->face->glyph_height);
-    printf("%d\n", lines_from_bottom);
-
+    int lines_from_bottom = (int)((rect_height(view->rect) - cursor_y) / view->face->glyph_height);
     int64 line = view->cursor.line + lines_from_bottom;
     line = CLAMP(line, 0, get_line_count(view->buffer) - 1);
 
     view->y_off = (int)(line * view->face->glyph_height);
     int max_y_off = (int)((get_line_count(view->buffer) - 4) * view->face->glyph_height);
     view->y_off = view->y_off > max_y_off ? max_y_off : view->y_off;
-    view->cursor = get_cursor_from_line(view->buffer, line);
+    view_set_cursor(view, get_cursor_from_line(view->buffer, line));
 }
 
 void write_buffer(Buffer *buffer) {
@@ -392,23 +410,23 @@ COMMAND(set_mark) {
 COMMAND(goto_beginning_of_line) {
     View *view = active_view;
     int64 position = get_position_from_line(view->buffer, view->cursor.line);
-    view->cursor = get_cursor_from_position(view->buffer, position);
+    view_set_cursor(view, get_cursor_from_position(view->buffer, position));
 }
 
 COMMAND(goto_end_of_line) {
     View *view = active_view;
     int64 position = get_position_from_line(view->buffer, view->cursor.line) + get_line_length(view->buffer, view->cursor.line);
-    view->cursor = get_cursor_from_position(view->buffer, position);
+    view_set_cursor(view, get_cursor_from_position(view->buffer, position));
 }
 
 COMMAND(goto_first_line) {
     View *view = active_view;
-    view->cursor = get_cursor_from_position(view->buffer, 0);
+    view_set_cursor(view, get_cursor_from_position(view->buffer, 0));
 }
 
 COMMAND(goto_last_line) {
     View *view = active_view;
-    view->cursor = get_cursor_from_position(view->buffer, view->buffer->size - (view->buffer->gap_end - view->buffer->gap_start));
+    view_set_cursor(view, get_cursor_from_position(view->buffer, view->buffer->size - (view->buffer->gap_end - view->buffer->gap_start)));
 }
 
 void *allocate_system_event(size_t size) {
@@ -1214,7 +1232,6 @@ int main(int argc, char **argv) {
             assert(key < MAX_KEY_COUNT);
             Key_Command *command = &active_keymap->commands[key];
             if (command->procedure) {
-                // printf("executing '%s'\n", command->name);
                 command->procedure();
             }
 
