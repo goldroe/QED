@@ -1,11 +1,13 @@
 #include "qed.h"
 #include "buffer.h"
+#include "draw.h"
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-
-extern Array<Vertex> vertices;
 
 String buffer_to_string(Buffer *buffer) {
     int64 buffer_length = get_buffer_length(buffer);
@@ -17,146 +19,99 @@ String buffer_to_string(Buffer *buffer) {
     return result;
 }
 
-float get_string_width(Face *face, char *str, int64 count) {
-    float result = 0.0f;
-    for (int64 i = 0; i < count; i++) {
-        char c = str[i];
-        Glyph *glyph = &face->glyphs[c];
-        result += glyph->ax;
+Face *load_font_face(const char *font_name, int font_height) {
+    FT_Library ft_lib;
+    int err = FT_Init_FreeType(&ft_lib);
+    if (err) {
+        printf("Error initializing freetype library: %d\n", err);
     }
-    return result;
-}
 
-void draw_vertex(float x, float y, float u, float v, v4 color) {
-    Vertex vertex;
-    vertex.position.x = x;
-    vertex.position.y = y;
-    vertex.uv.x = u;
-    vertex.uv.y = v;
-    vertex.color = color;
-    vertices.push(vertex);
-}
+    FT_Face ft_face;
+    err = FT_New_Face(ft_lib, font_name, 0, &ft_face);
+    if (err == FT_Err_Unknown_File_Format) {
+        printf("Format not supported\n");
+    } else if (err) {
+        printf("Font file could not be read\n");
+    }
 
-void draw_rectangle(Rect rect, v4 color) {
-    draw_vertex(rect.x0, rect.y0, 0.0f, 0.0f, color);
-    draw_vertex(rect.x0, rect.y1, 0.0f, 0.0f, color);
-    draw_vertex(rect.x1, rect.y1, 0.0f, 0.0f, color);
-    draw_vertex(rect.x0, rect.y0, 0.0f, 0.0f, color);
-    draw_vertex(rect.x1, rect.y1, 0.0f, 0.0f, color);
-    draw_vertex(rect.x1, rect.y0, 0.0f, 0.0f, color);
-}
+    err = FT_Set_Pixel_Sizes(ft_face, 0, font_height);
+    if (err) {
+        printf("Error setting pixel sizes of font\n");
+    }
 
-void draw_string(Face *face, v2 offset, char *string, int64 count, v4 text_color) {
-    v2 cursor = V2(0.0f, 0.0f);
-    for (int64 i = 0; i < count; i++) {
-        char c = string[i];
-        if (c == '\n') {
-            cursor.x = 0.0f;
-            cursor.y += face->glyph_height;
+    Face *face = new Face();
+
+    int bbox_ymax = FT_MulFix(ft_face->bbox.yMax, ft_face->size->metrics.y_scale) >> 6;
+    int bbox_ymin = FT_MulFix(ft_face->bbox.yMin, ft_face->size->metrics.y_scale) >> 6;
+    int height = bbox_ymax - bbox_ymin;
+    float ascend = ft_face->size->metrics.ascender / 64.f;
+    float descend = ft_face->size->metrics.descender / 64.f;
+    float bbox_height = (float)(bbox_ymax - bbox_ymin);
+    float glyph_height = (float)ft_face->size->metrics.height / 64.f;
+    float glyph_width = (float)(ft_face->size->metrics.max_advance) / 64.f;
+
+    int atlas_width = 1; // white pixel
+    int atlas_height = 0;
+    int max_bmp_height = 0;
+    for (uint32 c = 0; c < 256; c++) {
+        if (FT_Load_Char(ft_face, c, FT_LOAD_RENDER)) {
+            printf("Error loading char %c\n", c);
             continue;
         }
 
-        Glyph *glyph = face->glyphs + c;
-        float x0 = cursor.x + glyph->bl;
-        float x1 = x0 + glyph->bx;
-        float y0 = cursor.y - glyph->bt + face->ascend - offset.y;
-        float y1 = y0 + glyph->by; 
-
-        float tw = glyph->bx / (float)face->width;
-        float th = glyph->by / (float)face->height;
-        float tx = glyph->to;
-        float ty = 0.0f;
-
-        draw_vertex(x0, y1, tx,      ty + th, text_color);
-        draw_vertex(x0, y0, tx,      ty,      text_color);
-        draw_vertex(x1, y0, tx + tw, ty,      text_color);
-        draw_vertex(x0, y1, tx,      ty + th, text_color);
-        draw_vertex(x1, y0, tx + tw, ty,      text_color);
-        draw_vertex(x1, y1, tx + tw, ty + th, text_color);
-
-        cursor.x += glyph->ax;
-    }
-}
-
-void draw_view(View *view) {
-    v4 bg_color = V4(0.12f, 0.12f, 0.12f, 1.0f);
-    v4 text_color = V4(0.73f, 0.69f, 0.72f, 1.0f);
-    v4 cursor_color = V4(1.0f, 1.0f, 1.0f, 1.0f);
-    v4 hl_color = V4(0.68f, 0.86f, 0.92f, 1.0f);
-    bg_color = V4(1.0f, 1.0f, 1.0f, 1.0f);
-    text_color = V4(0.12f, 0.12f, 0.12f, 1.0f);
-    cursor_color = V4(0.0f, 0.0f, 0.0f, 0.8f);
-
-    draw_rectangle(view->rect, bg_color);
-
-    if (view->mark_active) {
-        Cursor start = view->mark;
-        Cursor end = view->cursor;
-        if (start.position > end.position) {
-            Cursor temp = start;
-            start = end;
-            end = temp;
+        atlas_width += ft_face->glyph->bitmap.width;
+        if (atlas_height < (int)ft_face->glyph->bitmap.rows) {
+            atlas_height = ft_face->glyph->bitmap.rows;
         }
 
-        float line_height = view->face->glyph_height;
-
-        float line_x = 0.0f;
-        float line_y = line_height * start.line - view->y_off;
-
-        // draw first line
-        int64 line_end = view->buffer->line_starts[start.line + 1];
-        float line_width = 0.0f;
-        for (int64 p = view->buffer->line_starts[start.line]; p < start.position; p++) {
-            char c = buffer_at(view->buffer, p);
-            Glyph *g = &view->face->glyphs[c];
-            line_x += g->ax;
+        int bmp_height = ft_face->glyph->bitmap.rows + ft_face->glyph->bitmap_top;
+        if (max_bmp_height < bmp_height) {
+            max_bmp_height = bmp_height;
         }
-        if (start.line < end.line) {
-            for (int64 position = start.position ; position < line_end; position++) {
-                char c = buffer_at(view->buffer, position);
-                Glyph *g = &view->face->glyphs[c];
-                line_width += g->ax;
-            }
-            Rect line_rect = { line_x, line_y, line_x + line_width, line_y + line_height };
-            draw_rectangle(line_rect, hl_color);
-        }
-
-        // draw whole lines
-        for (int64 line = start.line + 1; line < end.line; line++) {
-            line_width = 0.0f;
-            line_y = line_height * line - view->y_off;
-            line_end = view->buffer->line_starts[line + 1];
-            for (int64 position = view->buffer->line_starts[line]; position < line_end; position++) {
-                char c = buffer_at(view->buffer, position);
-                Glyph *g = &view->face->glyphs[c];
-                line_width += g->ax;
-            }
-            Rect line_rect = { 0.0f, line_y, line_width, line_y + line_height };
-            draw_rectangle(line_rect, hl_color);
-        }
-
-        // draw remainder line
-        line_width = 0.0f;
-        line_y = line_height * end.line - view->y_off;
-        for (int64 position = view->buffer->line_starts[end.line]; position < end.position; position++) {
-            char c = buffer_at(view->buffer, position);
-            Glyph *g = &view->face->glyphs[c];
-            line_width += g->ax;
-        }
-        Rect line_rect = { 0.0f, line_y, line_width, line_y + line_height };
-        draw_rectangle(line_rect, hl_color);
     }
 
-    String buffer_string = buffer_to_string(view->buffer);
+    int atlas_x = 1; // white pixel
 
-    draw_string(view->face, V2(0.0f, (float)view->y_off), buffer_string.data, buffer_string.count, text_color);
 
-    float cw = get_string_width(view->face, buffer_string.data + view->cursor.position, 1);
-    if (cw == 0) cw = view->face->glyph_width;
-    float cx = get_string_width(view->face, buffer_string.data + view->buffer->line_starts[view->cursor.line], view->cursor.col);
-    float cy = view->cursor.line * view->face->glyph_height - view->y_off;
-    Rect rc = { cx, cy, cx + cw, cy + view->face->glyph_height };
-    draw_rectangle(rc, cursor_color);
+    // Pack glyph bitmaps
+    unsigned char *bitmap = (unsigned char *)calloc(atlas_width * atlas_height + 1, 1);
+    bitmap[0] = 255;
+    for (uint32 c = 0; c < 256; c++) {
+        if (FT_Load_Char(ft_face, c, FT_LOAD_RENDER)) {
+            printf("Error loading char '%c'\n", c);
+        }
 
-    free(buffer_string.data);
+        Glyph *glyph = &face->glyphs[c];
+        glyph->ax = (float)(ft_face->glyph->advance.x >> 6);
+        glyph->ay = (float)(ft_face->glyph->advance.y >> 6);
+        glyph->bx = (float)ft_face->glyph->bitmap.width;
+        glyph->by = (float)ft_face->glyph->bitmap.rows;
+        glyph->bt = (float)ft_face->glyph->bitmap_top;
+        glyph->bl = (float)ft_face->glyph->bitmap_left;
+        glyph->to = (float)atlas_x / atlas_width;
+            
+        // Write glyph bitmap to atlas
+        for (int y = 0; y < glyph->by; y++) {
+            unsigned char *dest = bitmap + y * atlas_width + atlas_x;
+            unsigned char *source = ft_face->glyph->bitmap.buffer + y * ft_face->glyph->bitmap.width;
+            memcpy(dest, source, ft_face->glyph->bitmap.width);
+        }
+
+        atlas_x += ft_face->glyph->bitmap.width;
+    }
+
+    void *d3d11_create_face_texture(uint8 *bitmap, int width, int height);
+    face->width = atlas_width;
+    face->height = atlas_height;
+    face->max_bmp_height = max_bmp_height;
+    face->ascend = ascend;
+    face->descend = descend;
+    face->bbox_height = height;
+    face->glyph_width = glyph_width;
+    face->glyph_height = glyph_height;
+    face->texture = d3d11_create_face_texture(bitmap, atlas_width, atlas_height);
+
+    FT_Done_Face(ft_face);
+    FT_Done_FreeType(ft_lib);
+    return face;
 }

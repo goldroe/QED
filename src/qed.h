@@ -194,15 +194,5 @@ struct Key_Stroke : System_Event {
     Key_Modifiers modifiers;
 };
 
-struct Vertex {
-    v2 position;
-    v2 uv;
-    v4 color;
-};
-
-struct Simple_Constants {
-    m4 transform;
-};
-
-void draw_view(View *view);
 String buffer_to_string(Buffer *buffer);
+Face *load_font_face(const char *font_name, int font_height);
