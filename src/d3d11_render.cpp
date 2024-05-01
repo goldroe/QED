@@ -226,8 +226,8 @@ Shader *make_shader(const char *shader_name, const char *source, const char *vs_
 }
 
 Shader *make_shader_from_file(const char *file_name, const char *vs_entry, const char *ps_entry, D3D11_INPUT_ELEMENT_DESC *items, int item_count) {
-    char *source = read_file_string(file_name);
-    Shader *shader = make_shader(file_name, source, vs_entry, ps_entry, items, item_count);
+    String source = read_file_string(file_name);
+    Shader *shader = make_shader(file_name, source.data, vs_entry, ps_entry, items, item_count);
     //shader->name = copy_string(path_strip_file_name(file_name));
     return shader;
 }
