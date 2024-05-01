@@ -497,17 +497,18 @@ File_Attributes get_file_attributes(const char *file_name) {
     return attributes;
 }
 
-char *read_file_string(const char *file_name) {
-    char *result = NULL;
+String read_file_string(const char *file_name) {
+    String result{};
     HANDLE file_handle = CreateFileA((LPCSTR)file_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file_handle != INVALID_HANDLE_VALUE) {
         uint64 bytes_to_read;
         if (GetFileSizeEx(file_handle, (PLARGE_INTEGER)&bytes_to_read)) {
             assert(bytes_to_read <= UINT32_MAX);
-            result = (char *)malloc(bytes_to_read + 1);
-            result[bytes_to_read] = 0;
+            result.data = (char *)malloc(bytes_to_read + 1);
+            result.data[bytes_to_read] = 0;
             DWORD bytes_read;
-            if (ReadFile(file_handle, result, (DWORD)bytes_to_read, &bytes_read, NULL) && (DWORD)bytes_to_read ==  bytes_read) {
+            if (ReadFile(file_handle, result.data, (DWORD)bytes_to_read, &bytes_read, NULL) && (DWORD)bytes_to_read ==  bytes_read) {
+                result.count = bytes_read;
             } else {
                 // TODO: error handling
                 printf("ReadFile: error reading file, %s!\n", file_name);
@@ -540,11 +541,11 @@ Read_File read_entire_file(const char *file_name) {
                 // TODO: error handling
                 printf("ReadFile: error reading file, %s!\n", file_name);
             }
-       } else {
-
+        } else {
             // TODO: error handling
             printf("GetFileSize: error getting size of file: %s!\n", file_name);
-       }
+        }
+        CloseHandle(file_handle);
     } else {
         // TODO: error handling
         printf("CreateFile: error opening file: %s!\n", file_name);
@@ -564,7 +565,6 @@ Read_File open_entire_file(const char *file_name) {
             if (ReadFile(file_handle, result.data, (DWORD)bytes_to_read, &bytes_read, NULL) && (DWORD)bytes_to_read ==  bytes_read) {
                 result.count = bytes_read;
                 //result.handle = (Platform_Handle)file_handle;
-                CloseHandle(file_handle);
                 //if (SetFilePointer(file_handle, 0, 0, FILE_BEGIN) == INVALID_SET_FILE_POINTER) {
                 //    printf("SetFilePointer: error rewinding file, '%s'\n", file_name);
                 //}
@@ -572,10 +572,11 @@ Read_File open_entire_file(const char *file_name) {
                 // TODO: error handling
                 printf("ReadFile: error reading file, %s!\n", file_name);
             }
-       } else {
+        } else {
             // TODO: error handling
             printf("GetFileSize: error getting size of file: %s!\n", file_name);
-       }
+        }
+        CloseHandle(file_handle);
     } else {
         // TODO: error handling
         printf("CreateFile: error opening file: %s!\n", file_name);
@@ -823,12 +824,17 @@ int main(int argc, char **argv) {
     void d3d11_initialize_devices(uint32 width, uint32 height, HWND window_handle);
     d3d11_initialize_devices(WIDTH, HEIGHT, window);
 
+
+    Theme *load_theme(const char *file_name);
+    Theme *theme = load_theme("themes/nord.qed-theme");
+
     active_view = new View();
     active_view->rect = { 0.0f, 0.0f, (float)WIDTH, (float)HEIGHT };
     active_view->buffer = make_buffer_from_file(file_name);
     active_view->cursor = {};
-    active_view->face = load_font_face("fonts/consolas.ttf", 20);
+    active_view->face = load_font_face("fonts/consolas.ttf", 14);
     active_view->y_off = 0;
+    active_view->theme = theme;
     
     while (!window_should_close) {
         MSG message;

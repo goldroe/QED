@@ -5,6 +5,23 @@
 #include "types.h"
 #include "buffer.h" 
 
+enum Theme_Color {
+    THEME_COLOR_NONE = -1,
+    
+    THEME_COLOR_DEFAULT,
+    THEME_COLOR_BACKGROUND,
+    THEME_COLOR_REGION,
+    THEME_COLOR_CURSOR,
+    THEME_COLOR_CURSOR_CHAR,
+
+    THEME_COLOR_MAX,
+};
+
+struct Theme {
+    char *name;
+    uint32 colors[THEME_COLOR_MAX];
+};
+
 typedef void (*Command_Proc)();
 #define COMMAND(Name) void Name()
 
@@ -145,6 +162,8 @@ struct View {
     Cursor mark;
 
     int y_off;
+
+    Theme *theme;
 };
 
 struct Input {

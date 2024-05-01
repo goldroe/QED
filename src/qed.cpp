@@ -8,6 +8,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
+#include <stdlib.h>
 
 String buffer_to_string(Buffer *buffer) {
     int64 buffer_length = get_buffer_length(buffer);
@@ -114,4 +116,107 @@ Face *load_font_face(const char *font_name, int font_height) {
     FT_Done_Face(ft_face);
     FT_Done_FreeType(ft_lib);
     return face;
+}
+
+uint32 hex_to_uint32(char *stream, char **ptr) {
+    uint32 result = 0;
+    while (isalnum(*stream)) {
+        int digit = 0;
+        char c = toupper(*stream);
+        if (c >= 'A' && c <= 'Z') {
+            digit = c - 'A' + 10; 
+        } else if (c >= '0' && c <= '9') {
+            digit = c - '0';
+        }
+        result = result * 16 + digit;
+
+        stream++;
+    }
+    if (ptr) *ptr = stream;
+    return result;
+}
+
+// This is really lazy
+// @Speed make a hash table for the theme field names
+Theme_Color theme_name_to_color(char *name) {
+    if (strcmp(name, "default") == 0) {
+        return THEME_COLOR_DEFAULT;
+    } else if (strcmp(name, "background") == 0) {
+        return THEME_COLOR_BACKGROUND; 
+    } else if (strcmp(name, "region") == 0) {
+        return THEME_COLOR_REGION;
+    } else if (strcmp(name, "cursor") == 0) {
+        return THEME_COLOR_CURSOR;
+    } else if (strcmp(name, "cursor_char") == 0) {
+        return THEME_COLOR_CURSOR_CHAR;
+    } else {
+        assert(0);
+        return THEME_COLOR_NONE;
+    }
+}
+
+void theme_set_field(Theme *theme, char *name, uint32 color_value) {
+    Theme_Color color = theme_name_to_color(name);
+    theme->colors[color] = color_value;
+}
+
+//@Todo Make more robust
+// This is a very lazy parser
+Theme *load_theme(const char *file_name) {
+    Theme *theme = new Theme();
+
+    String string = read_file_string(file_name);
+    char *stream = string.data;
+
+    for (;;) {
+        if (*stream == 0) break;
+        
+        switch (*stream) {
+        default:
+        {
+            char *start = stream;
+            while (*stream != ':') {
+                stream++;
+            }
+            assert(*stream == ':');
+
+            int64 field_len = stream - start;
+            char *field_name = (char *)malloc(field_len + 1);
+            strncpy(field_name, start, field_len);
+            field_name[field_len] = 0;
+
+            stream++;
+            while (isspace(*stream)) {
+                stream++;
+            }
+
+            assert(isalnum(*stream));
+
+            uint32 color_value = hex_to_uint32(stream, &stream);
+            theme_set_field(theme, field_name, color_value);
+            break;
+        }
+        case '#':
+            while (*stream != 0 &&
+                *stream != '\n' && *stream != '\r') {
+                stream++;
+            }
+            break;
+        case '[':
+        {
+            stream++;
+            int version = strtol(stream, &stream, 10);
+            assert(*stream == ']');
+            stream++;
+            break;
+        }
+        case '\n': case ' ': case '\f': case '\t': case '\r':
+            while (isspace(*stream)) {
+                stream++;
+            }
+            break;
+        }
+    }
+
+    return theme;
 }

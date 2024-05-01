@@ -86,16 +86,22 @@ void draw_string(Render_Target *t, Face *face, v2 offset, char *string, int64 co
     }
 }
 
-void draw_view(Render_Target *t, View *view) {
-    v4 bg_color = V4(0.12f, 0.12f, 0.12f, 1.0f);
-    v4 text_color = V4(0.73f, 0.69f, 0.72f, 1.0f);
-    v4 cursor_color = V4(1.0f, 1.0f, 1.0f, 1.0f);
-    v4 hl_color = V4(0.68f, 0.86f, 0.92f, 1.0f);
-    bg_color = V4(1.0f, 1.0f, 1.0f, 1.0f);
-    text_color = V4(0.12f, 0.12f, 0.12f, 1.0f);
-    cursor_color = V4(0.0f, 0.0f, 0.0f, 0.8f);
+inline v4 argb_to_v4(uint32 argb) {
+    v4 result;
+    result.x = (float)(argb >> 24 & 0xFF) / 255.0f;
+    result.y = (float)(argb >> 16 & 0xFF) / 255.0f;
+    result.z = (float)(argb >> 8 & 0xFF) / 255.0f;
+    result.w = (float)(argb & 0xFF) / 255.0f;
+    return result;
+}
 
-    draw_rectangle(t, view->rect, bg_color);
+inline v4 theme_color(Theme *theme, Theme_Color color) {
+    v4 result = argb_to_v4(theme->colors[color]);
+    return result;
+}
+
+void draw_view(Render_Target *t, View *view) {
+    draw_rectangle(t, view->rect, theme_color(view->theme, THEME_COLOR_BACKGROUND));
 
     if (view->mark_active) {
         Cursor start = view->mark;
@@ -126,7 +132,7 @@ void draw_view(Render_Target *t, View *view) {
                 line_width += g->ax;
             }
             Rect line_rect = { line_x, line_y, line_x + line_width, line_y + line_height };
-            draw_rectangle(t, line_rect, hl_color);
+            draw_rectangle(t, line_rect, theme_color(view->theme, THEME_COLOR_REGION));
         }
 
         // draw whole lines
@@ -140,7 +146,7 @@ void draw_view(Render_Target *t, View *view) {
                 line_width += g->ax;
             }
             Rect line_rect = { 0.0f, line_y, line_width, line_y + line_height };
-            draw_rectangle(t, line_rect, hl_color);
+            draw_rectangle(t, line_rect, theme_color(view->theme, THEME_COLOR_REGION));
         }
 
         // draw remainder line
@@ -152,19 +158,19 @@ void draw_view(Render_Target *t, View *view) {
             line_width += g->ax;
         }
         Rect line_rect = { 0.0f, line_y, line_width, line_y + line_height };
-        draw_rectangle(t, line_rect, hl_color);
+        draw_rectangle(t, line_rect, theme_color(view->theme, THEME_COLOR_REGION));
     }
 
     String buffer_string = buffer_to_string(view->buffer);
 
-    draw_string(t, view->face, V2(0.0f, (float)view->y_off), buffer_string.data, buffer_string.count, text_color);
+    draw_string(t, view->face, V2(0.0f, (float)view->y_off), buffer_string.data, buffer_string.count, theme_color(view->theme, THEME_COLOR_DEFAULT));
 
     float cw = get_string_width(view->face, buffer_string.data + view->cursor.position, 1);
     if (cw == 0) cw = view->face->glyph_width;
     float cx = get_string_width(view->face, buffer_string.data + view->buffer->line_starts[view->cursor.line], view->cursor.col);
     float cy = view->cursor.line * view->face->glyph_height - view->y_off;
     Rect rc = { cx, cy, cx + cw, cy + view->face->glyph_height };
-    draw_rectangle(t, rc, cursor_color);
+    draw_rectangle(t, rc, theme_color(view->theme, THEME_COLOR_CURSOR));
 
     free(buffer_string.data);
 }
