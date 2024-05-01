@@ -16,7 +16,7 @@ struct File_Attributes {
     uint64 file_size;
 };
 
-char *read_file_string(const char *file_name);
+String read_file_string(const char *file_name);
 Read_File read_entire_file(const char *file_name);
 Read_File open_entire_file(const char *file_name);
 File_Attributes get_file_attributes(const char *file_name);
