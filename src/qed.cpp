@@ -11,16 +11,6 @@
 #include <ctype.h>
 #include <stdlib.h>
 
-String buffer_to_string(Buffer *buffer) {
-    int64 buffer_length = get_buffer_length(buffer);
-    String result{};
-    result.data = (char *)malloc(buffer_length);
-    memcpy(result.data, buffer->text, buffer->gap_start);
-    memcpy(result.data + buffer->gap_start, buffer->text + buffer->gap_end, buffer->size - buffer->gap_end);
-    result.count = buffer_length;
-    return result;
-}
-
 Face *load_font_face(const char *font_name, int font_height) {
     FT_Library ft_lib;
     int err = FT_Init_FreeType(&ft_lib);
@@ -149,6 +139,10 @@ Theme_Color theme_name_to_color(char *name) {
         return THEME_COLOR_CURSOR;
     } else if (strcmp(name, "cursor_char") == 0) {
         return THEME_COLOR_CURSOR_CHAR;
+    } else if (strcmp(name, "ui_default") == 0) {
+        return THEME_COLOR_UI_DEFAULT;
+    } else if (strcmp(name, "ui_background") == 0) {
+        return THEME_COLOR_UI_BACKGROUND;
     } else {
         assert(0);
         return THEME_COLOR_NONE;

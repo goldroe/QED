@@ -14,6 +14,9 @@ enum Theme_Color {
     THEME_COLOR_CURSOR,
     THEME_COLOR_CURSOR_CHAR,
 
+    THEME_COLOR_UI_DEFAULT,
+    THEME_COLOR_UI_BACKGROUND,
+
     THEME_COLOR_MAX,
 };
 
@@ -83,6 +86,7 @@ enum Key_Code {
     KEY_PERIOD,
     KEY_QUOTE,
 
+    KEY_ESCAPE,
     KEY_ENTER,
     KEY_BACKSPACE,
     KEY_DELETE,
@@ -164,6 +168,7 @@ struct View {
     int y_off;
 
     Theme *theme;
+    Key_Map *key_map;
 };
 
 struct Input {
@@ -213,5 +218,14 @@ struct Key_Stroke : System_Event {
     Key_Modifiers modifiers;
 };
 
-String buffer_to_string(Buffer *buffer);
+
 Face *load_font_face(const char *font_name, int font_height);
+
+
+struct Find_File_Dialog {
+    char *current_path;
+    Array<char*> files;
+    View *view;
+    View *last_active;
+    bool is_active;
+};

@@ -4,16 +4,12 @@
 #include <timeapi.h>
 #include <windowsx.h>
 #include <fileapi.h>
-// #include <d3d11.h>
-// #include <d3dcompiler.h>
 #undef near
 #undef far
-// #pragma comment(lib, "d3dcompiler.lib")
-// #pragma comment(lib, "dxguid.lib")
-// #pragma comment(lib, "d3d11.lib")
 #endif // _WIN32
 
 #include "platform.h"
+#include "path.h"
 #include "qed.h"
 #include "draw.h"
 
@@ -25,16 +21,15 @@
 static bool window_should_close;
 
 Array<System_Event *> system_events;
-
+Key_Code keycode_lookup[256];
 Key_Stroke *active_key_stroke;
 Text_Input *active_text_input;
 
 View *active_view;
-Key_Code keycode_lookup[256];
-
-Key_Map *active_keymap;
 
 Render_Target render_target;
+
+Find_File_Dialog find_file_dialog;
 
 float rect_width(Rect rect) {
     float result;
@@ -76,7 +71,7 @@ COMMAND(quit_selection) {
 COMMAND(newline) {
     View *view = active_view;
     Cursor cursor = view->cursor;
-    buffer_insert(view->buffer, cursor.position, '\n');
+    buffer_insert_single(view->buffer, cursor.position, '\n');
     cursor.position++;
     cursor.col = 0;
     cursor.line++;
@@ -94,9 +89,11 @@ COMMAND(self_insert) {
             view->mark_active = false;
             view_set_cursor(view, get_cursor_from_position(view->buffer, start));
         } else {
-            buffer_insert(view->buffer, view->cursor.position, active_text_input->text[0]);
+            buffer_insert_single(view->buffer, view->cursor.position, active_text_input->text[0]);
             view_set_cursor(view, get_cursor_from_position(view->buffer, view->cursor.position + 1));
         }
+
+        if (view->buffer->post_self_insert_hook) view->buffer->post_self_insert_hook(active_text_input);
     } else {
         assert(false);
     }
@@ -354,7 +351,8 @@ COMMAND(scroll_page_down) {
 }
 
 void write_buffer(Buffer *buffer) {
-    String buffer_string = buffer_to_string(buffer);
+    // String buffer_string = buffer_to_string(buffer);
+    String buffer_string = buffer_to_string_apply_line_endings(buffer);
     DWORD bytes_written = 0;
     HANDLE file_handle = CreateFileA((LPCSTR)buffer->file_name, GENERIC_WRITE, 0, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file_handle == INVALID_HANDLE_VALUE) {
@@ -407,6 +405,34 @@ COMMAND(goto_last_line) {
     view_set_cursor(view, get_cursor_from_position(view->buffer, view->buffer->size - (view->buffer->gap_end - view->buffer->gap_start)));
 }
 
+COMMAND(find_file) {
+    find_file_dialog.last_active = active_view;
+    find_file_dialog.is_active = true;
+    active_view = find_file_dialog.view;
+}
+
+COMMAND(find_file_enter) {
+    find_file_dialog.is_active = false;
+
+    String file_name = buffer_to_string(find_file_dialog.view->buffer);
+    printf("Opening %s\n", file_name.data);
+
+    View *view = find_file_dialog.last_active;
+    Buffer *buffer = make_buffer_from_file(file_name.data);
+    view->buffer = buffer;
+    view->mark_active = false;
+    view->cursor = {};
+    view->mark = {};
+    view->y_off = 0;
+    active_view = view;
+    buffer_clear(find_file_dialog.view->buffer);
+}
+
+COMMAND(find_file_escape) {
+    find_file_dialog.is_active = false;
+    active_view = find_file_dialog.last_active;
+}
+
 void *allocate_system_event(size_t size) {
     void *event = calloc(1, size); 
     return event;
@@ -444,6 +470,8 @@ void win32_keycodes_init() {
     for (int i = 0; i < 10; i++) {
         keycode_lookup['0' + i] = (Key_Code)(KEY_0 + i);
     }
+
+    keycode_lookup[VK_ESCAPE] = KEY_ESCAPE;
 
     keycode_lookup[VK_HOME] = KEY_HOME;
     keycode_lookup[VK_END] = KEY_END;
@@ -727,7 +755,7 @@ void set_key_command(Key_Map *key_map, uint16 key, Key_Command command) {
     key_map->commands[key] = command;
 }
 
-Key_Map *default_key_map() {
+Key_Map *make_default_key_map() {
     Key_Map *key_map = (Key_Map *)calloc(1, sizeof(Key_Map));
 
     Key_Command self_insert_command = make_key_command("self_insert", self_insert);
@@ -773,6 +801,8 @@ Key_Map *default_key_map() {
     set_key_command(key_map, KEY_PAGEUP, make_key_command("scroll_page_up", scroll_page_up));
     set_key_command(key_map, KEY_PAGEDOWN, make_key_command("scroll_page_down", scroll_page_down));
 
+    set_key_command(key_map, KEYMOD_CONTROL|KEY_O, make_key_command("find_file", find_file));
+
     // Emacs keybindings
     set_key_command(key_map, KEYMOD_CONTROL | KEY_J, make_key_command("newline", newline));
 
@@ -782,6 +812,44 @@ Key_Map *default_key_map() {
     set_key_command(key_map, KEYMOD_CONTROL | KEY_SPACE, make_key_command("set_mark", set_mark));
     set_key_command(key_map, KEYMOD_CONTROL | KEY_G, make_key_command("quit_selection", quit_selection));
     return key_map;
+}
+
+Key_Map *make_find_file_key_map() {
+    Key_Map *key_map = (Key_Map *)calloc(sizeof(Key_Map), 1);
+    Key_Command self_insert_command = make_key_command("self_insert", self_insert);
+    for (unsigned char c = 0; c < 128; c++) {
+        uint16 vk = VkKeyScanA(c);
+        vk = vk & 0x00ff; // discard high byte
+        Key_Code key = keycode_lookup[vk];
+        if (isprint(c) && key) {
+            set_key_command(key_map, key, self_insert_command);
+            set_key_command(key_map, KEYMOD_SHIFT|key, self_insert_command);
+        }
+    }
+
+    set_key_command(key_map, KEY_ENTER, make_key_command("find_file_enter", find_file_enter));
+    set_key_command(key_map, KEY_ESCAPE, make_key_command("find_file_escape", find_file_escape));
+    return key_map;
+}
+
+void find_file_post_self_insert_hook(Text_Input *input) {
+    WIN32_FIND_DATAA file_data;
+    char c = input->text[0];
+    if (c == '/' || c == '\\') {
+        // String string = buffer_to_string(find_file_dialog.view->buffer);
+        // find_file_dialog.current_path = string.data;
+    }
+
+    HANDLE file_handle = FindFirstFileA(find_file_dialog.current_path, &file_data);
+    if (file_handle != INVALID_HANDLE_VALUE) {
+        do {
+            printf("%s\n", file_data.cFileName);
+        } while (FindNextFileA(file_handle, &file_data));
+        FindClose(file_handle);
+    }
+}
+
+void default_post_self_insert_hook(Text_Input *input) {
 }
 
 int main(int argc, char **argv) {
@@ -799,7 +867,7 @@ int main(int argc, char **argv) {
 
     win32_keycodes_init();
 
-    active_keymap = default_key_map();
+    Key_Map *default_key_map = make_default_key_map();
 
 #define CLASSNAME L"QED_WINDOW_CLASS"
     HINSTANCE hinstance = GetModuleHandle(NULL);
@@ -824,18 +892,34 @@ int main(int argc, char **argv) {
     void d3d11_initialize_devices(uint32 width, uint32 height, HWND window_handle);
     d3d11_initialize_devices(WIDTH, HEIGHT, window);
 
-
     Theme *load_theme(const char *file_name);
-    Theme *theme = load_theme("themes/nord.qed-theme");
+    Theme *theme = load_theme("themes/gruvbox.qed-theme");
 
-    active_view = new View();
-    active_view->rect = { 0.0f, 0.0f, (float)WIDTH, (float)HEIGHT };
-    active_view->buffer = make_buffer_from_file(file_name);
-    active_view->cursor = {};
-    active_view->face = load_font_face("fonts/consolas.ttf", 14);
-    active_view->y_off = 0;
-    active_view->theme = theme;
-    
+    View *view = new View();
+    view->rect = { 0.0f, 0.0f, (float)WIDTH, (float)HEIGHT };
+    view->buffer = make_buffer_from_file(file_name);
+    view->buffer->post_self_insert_hook = default_post_self_insert_hook;
+    view->cursor = {};
+    view->face = load_font_face("fonts/JetBrainsMono.ttf", 18);
+    view->y_off = 0;
+    view->theme = theme;
+    view->key_map = default_key_map;
+
+    View *find_file_view = new View();
+    find_file_view->rect = { 0.15 * WIDTH, 0.1f * HEIGHT, 0.85f * WIDTH, 0.5f * HEIGHT };
+    find_file_view->buffer = make_buffer("find_file");
+    String current_dir = STRZ(path_current_dir());
+    buffer_insert_text(find_file_view->buffer, 0, current_dir);
+    find_file_view->cursor = get_cursor_from_position(find_file_view->buffer, get_buffer_length(find_file_view->buffer));
+    find_file_view->buffer->post_self_insert_hook = find_file_post_self_insert_hook;
+    find_file_view->face = load_font_face("fonts/SegUI.ttf", 20);
+    find_file_view->y_off = 0;
+    find_file_view->theme = load_theme("themes/gruvbox.qed-theme");
+    find_file_view->key_map = make_find_file_key_map();
+    find_file_dialog.view = find_file_view;
+
+    active_view = view;
+ 
     while (!window_should_close) {
         MSG message;
         while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
@@ -863,7 +947,7 @@ int main(int argc, char **argv) {
         if (active_key_stroke) {
             uint16 key = key_stroke_to_key(active_key_stroke);
             assert(key < MAX_KEY_COUNT);
-            Key_Command *command = &active_keymap->commands[key];
+            Key_Command *command = &active_view->key_map->commands[key];
             if (command->procedure) {
                 command->procedure();
             }
@@ -879,14 +963,13 @@ int main(int argc, char **argv) {
         win32_get_window_size(window, &width, &height);
         v2 render_dim = V2((float)width, (float)height);
 
-        active_view->rect = { 0.0f, 0.0f, render_dim.x, render_dim.y };
-
         render_target.width = width;
         render_target.height = height;
         render_target.current = nullptr;
         render_target.groups.reset_count();
 
-        draw_view(&render_target, active_view);
+        draw_view(&render_target, view);
+        draw_find_file_dialog(&render_target, &find_file_dialog);
 
         void d3d11_render(Render_Target *target);
         d3d11_render(&render_target);
