@@ -333,12 +333,25 @@ void d3d11_render(Render_Target *target) {
     d3d11_ctx->device_context->OMSetBlendState(d3d11_ctx->blend_state, blend_factor, 0xffffffff); 
     d3d11_ctx->device_context->OMSetDepthStencilState(d3d11_ctx->depth_stencil_state, 0);
 
+    ID3D11Buffer *vertex_buffer = nullptr;
+    UINT vertex_buffer_capacity = 0;
+
     for (int i = 0; i < target->groups.count; i++) {
         Render_Group *group = &target->groups[i];
         d3d11_ctx->device_context->PSSetShaderResources(0, 1, (ID3D11ShaderResourceView **)&group->texture);
         d3d11_ctx->device_context->PSSetSamplers(0, 1, &d3d11_ctx->sampler);
 
-        ID3D11Buffer *vertex_buffer = make_vertex_buffer(group->vertices.data, (int)group->vertices.count, sizeof(Vertex));
+        if (group->vertices.count == 0) continue;
+
+        if (group->vertices.count > vertex_buffer_capacity) {
+            vertex_buffer_capacity = (UINT)group->vertices.count;
+            if (vertex_buffer) vertex_buffer->Release();
+            vertex_buffer = make_vertex_buffer(group->vertices.data, (int)group->vertices.count, sizeof(Vertex));
+        } else {
+            update_vertex_buffer(vertex_buffer, group->vertices.data, (int32)group->vertices.count * sizeof(Vertex));
+        }
+
+
         UINT stride = sizeof(Vertex);
         UINT offset = 0;
         d3d11_ctx->device_context->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset);
@@ -347,9 +360,9 @@ void d3d11_render(Render_Target *target) {
         d3d11_ctx->device_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         d3d11_ctx->device_context->Draw((UINT)group->vertices.count, 0);
-
-        if (vertex_buffer) vertex_buffer->Release();
     }
+
+    if (vertex_buffer) vertex_buffer->Release();
 
     d3d11_ctx->swap_chain->Present(1, 0);
 }
