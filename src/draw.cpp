@@ -21,10 +21,14 @@ void draw__begin_group(Render_Target *t) {
 void draw__set_texture(Render_Target *t, void *texture) {
     if (!t->current) {
         draw__begin_group(t);
+        t->current->texture = texture;
     }
-
-    Render_Group *group = t->current;
-    group->texture = texture;
+    if (t->current->texture != texture) {
+        Render_Group *group = t->current;
+        draw__begin_group(t);
+        t->current->texture = texture;
+        t->current->clip_box = group->clip_box;
+    }
 }
 
 void draw_push_vertex(Render_Target *t, Vertex v) {
@@ -65,7 +69,7 @@ void draw_string(Render_Target *t, Face *face, v2 offset, char *string, int64 co
         }
 
         Glyph *glyph = face->glyphs + c;
-        float x0 = cursor.x + glyph->bl;
+        float x0 = offset.x + cursor.x + glyph->bl;
         float x1 = x0 + glyph->bx;
         float y0 = cursor.y - glyph->bt + face->ascend - offset.y;
         float y1 = y0 + glyph->by; 
@@ -101,6 +105,7 @@ inline v4 theme_color(Theme *theme, Theme_Color color) {
 }
 
 void draw_view(Render_Target *t, View *view) {
+    draw__set_texture(t, view->face->texture);
     draw_rectangle(t, view->rect, theme_color(view->theme, THEME_COLOR_BACKGROUND));
 
     if (view->mark_active) {
@@ -163,7 +168,7 @@ void draw_view(Render_Target *t, View *view) {
 
     String buffer_string = buffer_to_string(view->buffer);
 
-    draw_string(t, view->face, V2(0.0f, (float)view->y_off), buffer_string.data, buffer_string.count, theme_color(view->theme, THEME_COLOR_DEFAULT));
+    draw_string(t, view->face, V2(view->rect.x0, -view->rect.y0 + (float)view->y_off), buffer_string.data, buffer_string.count, theme_color(view->theme, THEME_COLOR_DEFAULT));
 
     float cw = get_string_width(view->face, buffer_string.data + view->cursor.position, 1);
     if (cw == 0) cw = view->face->glyph_width;
@@ -173,4 +178,13 @@ void draw_view(Render_Target *t, View *view) {
     draw_rectangle(t, rc, theme_color(view->theme, THEME_COLOR_CURSOR));
 
     free(buffer_string.data);
+}
+
+void draw_find_file_dialog(Render_Target *t, Find_File_Dialog *dialog) {
+    if (!dialog->is_active) return;
+
+    String file_name = buffer_to_string(dialog->view->buffer);
+    Rect rc = { 0.25f * t->width, 0.1f * t->height, 0.75f * t->width, 0.25f * t->height };
+    draw_rectangle(t, rc, theme_color(dialog->view->theme, THEME_COLOR_UI_BACKGROUND));
+    draw_string(t, dialog->view->face, V2(rc.x0, -rc.y0), file_name.data, file_name.count, theme_color(dialog->view->theme, THEME_COLOR_UI_DEFAULT));
 }

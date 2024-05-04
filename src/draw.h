@@ -27,3 +27,4 @@ struct Render_Target {
 };
 
 void draw_view(Render_Target *t, View *view);
+void draw_find_file_dialog(Render_Target *t, Find_File_Dialog *dialog);
