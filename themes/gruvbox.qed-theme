@@ -1,0 +1,10 @@
+[0]
+
+default:     D4BE98FF
+background:  32302FFF
+region:      3C3836FF
+cursor:      45403DFF
+cursor_char: FFFFFFFF
+
+ui_default:    D4BE98FF
+ui_background: 282828FF
