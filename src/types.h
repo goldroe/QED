@@ -30,3 +30,4 @@ struct String {
     int64 count;
 };
 
+#define STRZ(String) { (String), (int64)strlen(String) }
