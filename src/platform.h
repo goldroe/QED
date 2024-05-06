@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types.h"
+#include "custom_string.h"
 typedef int64 Platform_Handle;
 
 struct Read_File {

@@ -76,69 +76,7 @@ COMMAND(newline) {
     cursor.col = 0;
     cursor.line++;
     view_set_cursor(view, cursor);
-}
-
-String string_copy(const char *str) {
-    size_t len = strlen(str);
-    String result;
-    result.data = (char *)malloc(len + 1);
-    memcpy(result.data, str, len);
-    result.data[len] = 0;
-    result.count = len;
-    return result;
-}
-
-String string_reserve(int64 count) {
-    String result;
-    result.data = (char *)malloc(count + 1);
-    memset(result.data, 0, count + 1);
-    result.count = count;
-    return result;
-}
-
-String string_copy(String str) {
-    String result;
-    result.data = (char *)malloc(str.count + 1);
-    memcpy(result.data, str.data, str.count + 1);
-    result.count = str.count;
-    return result;
-}
-
-void string_concat(String *str1, String str2) {
-    char *temp = str1->data;
-    int64 new_count = str1->count + str2.count;
-    str1->data = (char *)malloc(new_count + 1);
-    memcpy(str1->data, temp, str1->count);
-    memcpy(str1->data + str1->count, str2.data, str2.count);
-    str1->data[new_count] = 0;
-    str1->count += str2.count;
-}
-
-void buffer_record_insert(Buffer *buffer, int64 position, String text) {
-    Edit_Record *current = buffer->edit_history;
-    if (current && current->type == EDIT_RECORD_INSERT && position == current->span.end) {
-        string_concat(&current->text, text);
-        current->span.end = position + text.count;
-    } else {
-        Edit_Record *edit = new Edit_Record();
-        edit->type = EDIT_RECORD_INSERT;
-        edit->span = { position, position + text.count };
-        edit->text = text;
-        edit->prev = current;
-        buffer->edit_history = edit;
-    }
-}
-
-void buffer_record_delete(Buffer *buffer, int64 start, int64 end) {
-    Edit_Record *current = buffer->edit_history;
-    {
-        Edit_Record *edit = new Edit_Record();
-        edit->type = EDIT_RECORD_DELETE;
-        edit->span = { start, end };
-        edit->text = buffer_to_string_span(buffer, {start, end});
-        edit->prev = current;
-        buffer->edit_history = edit;
-    }
+    
 }
 
 COMMAND(self_insert) {
@@ -1006,6 +944,8 @@ int main(int argc, char **argv) {
         SetWindowPos(window, HWND_NOTOPMOST, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOMOVE|SWP_NOZORDER);
     }
 
+    UINT dpi = GetDpiForWindow(window);
+
     void d3d11_initialize_devices(uint32 width, uint32 height, HWND window_handle);
     d3d11_initialize_devices(WIDTH, HEIGHT, window);
 
@@ -1017,7 +957,7 @@ int main(int argc, char **argv) {
     view->buffer = make_buffer_from_file(file_name);
     view->buffer->post_self_insert_hook = default_post_self_insert_hook;
     view->cursor = {};
-    view->face = load_font_face("fonts/JetBrainsMono.ttf", 18);
+    view->face = load_font_face("fonts/consolas.ttf", 10);
     view->y_off = 0;
     view->theme = theme;
     view->key_map = default_key_map;
@@ -1029,7 +969,7 @@ int main(int argc, char **argv) {
     buffer_insert_text(find_file_view->buffer, 0, current_dir);
     find_file_view->cursor = get_cursor_from_position(find_file_view->buffer, buffer_get_length(find_file_view->buffer));
     find_file_view->buffer->post_self_insert_hook = find_file_post_self_insert_hook;
-    find_file_view->face = load_font_face("fonts/SegUI.ttf", 20);
+    find_file_view->face = load_font_face("fonts/SegUI.ttf", 12);
     find_file_view->y_off = 0;
     find_file_view->theme = load_theme("themes/gruvbox.qed-theme");
     find_file_view->key_map = make_find_file_key_map();

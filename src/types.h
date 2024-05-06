@@ -25,15 +25,8 @@ struct Cursor {
     int64 col;
 };
 
-struct String {
-    char *data;
-    int64 count;
-};
-
 struct Span {
     int64 start;
     int64 end;
 };
 
-
-#define STRZ(String) { (String), (int64)strlen(String) }
