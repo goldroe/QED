@@ -164,6 +164,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\buffer.cpp" />
+    <ClCompile Include="src\custom_string.cpp" />
     <ClCompile Include="src\d3d11_render.cpp" />
     <ClCompile Include="src\draw.cpp" />
     <ClCompile Include="src\path.cpp" />
