@@ -15,7 +15,7 @@
 void buffer_update_line_starts(Buffer *buffer);
 
 String buffer_to_string(Buffer *buffer) {
-    int64 buffer_length = get_buffer_length(buffer);
+    int64 buffer_length = buffer_get_length(buffer);
     String result{};
     result.data = (char *)malloc(buffer_length + 1);
     memcpy(result.data, buffer->text, buffer->gap_start);
@@ -25,9 +25,25 @@ String buffer_to_string(Buffer *buffer) {
     return result;
 }
 
+String buffer_to_string_span(Buffer *buffer, Span span) {
+    String result{};
+    int64 span_length = span.end - span.start;
+    assert(span.start >= 0 && span.end >= 0);
+    assert(span_length >= 0);
+    if (span.end < buffer_get_length(buffer)) {
+        result.data = (char *)malloc(span_length + 1);
+        result.data[span_length] = 0;
+        for (int64 i = 0; i < span_length; i++) {
+            result.data[i] = buffer_at(buffer, span.start + i);
+        }
+    }
+    result.count = span_length;
+    return result;
+}
+
 String buffer_to_string_apply_line_endings(Buffer *buffer) {
-    int64 buffer_length = get_buffer_length(buffer); // @todo wrong?
-    int64 new_buffer_length = buffer_length + ((buffer->line_ending == LINE_ENDING_CRLF) ? get_line_count(buffer) : 0);
+    int64 buffer_length = buffer_get_length(buffer); // @todo wrong?
+    int64 new_buffer_length = buffer_length + ((buffer->line_ending == LINE_ENDING_CRLF) ? buffer_get_line_count(buffer) : 0);
     String buffer_string;
     buffer_string.data = (char *)malloc(new_buffer_length + 1);
     buffer_string.count = new_buffer_length;
@@ -57,17 +73,17 @@ String buffer_to_string_apply_line_endings(Buffer *buffer) {
     return buffer_string;
 }
 
-int64 get_line_length(Buffer *buffer, int64 line) {
+int64 buffer_get_line_length(Buffer *buffer, int64 line) {
     int64 length = buffer->line_starts[line + 1] - buffer->line_starts[line] - 1;
     return length;
 }
 
-int64 get_line_count(Buffer *buffer) {
+int64 buffer_get_line_count(Buffer *buffer) {
     int64 result = buffer->line_starts.count - 1;
     return result;
 }
 
-int64 get_buffer_length(Buffer *buffer) {
+int64 buffer_get_length(Buffer *buffer) {
     int64 result = BUFFER_SIZE(buffer);
     return result;
 }
@@ -169,7 +185,7 @@ char buffer_at(Buffer *buffer, int64 position) {
         index += GAP_SIZE(buffer);
     }
     char c = 0;
-    if (get_buffer_length(buffer) > 0) {
+    if (buffer_get_length(buffer) > 0) {
        c = buffer->text[index]; 
     }
     return c;

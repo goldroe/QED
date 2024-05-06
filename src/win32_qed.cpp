@@ -78,8 +78,72 @@ COMMAND(newline) {
     view_set_cursor(view, cursor);
 }
 
+String string_copy(const char *str) {
+    size_t len = strlen(str);
+    String result;
+    result.data = (char *)malloc(len + 1);
+    memcpy(result.data, str, len);
+    result.data[len] = 0;
+    result.count = len;
+    return result;
+}
+
+String string_reserve(int64 count) {
+    String result;
+    result.data = (char *)malloc(count + 1);
+    memset(result.data, 0, count + 1);
+    result.count = count;
+    return result;
+}
+
+String string_copy(String str) {
+    String result;
+    result.data = (char *)malloc(str.count + 1);
+    memcpy(result.data, str.data, str.count + 1);
+    result.count = str.count;
+    return result;
+}
+
+void string_concat(String *str1, String str2) {
+    char *temp = str1->data;
+    int64 new_count = str1->count + str2.count;
+    str1->data = (char *)malloc(new_count + 1);
+    memcpy(str1->data, temp, str1->count);
+    memcpy(str1->data + str1->count, str2.data, str2.count);
+    str1->data[new_count] = 0;
+    str1->count += str2.count;
+}
+
+void buffer_record_insert(Buffer *buffer, int64 position, String text) {
+    Edit_Record *current = buffer->edit_history;
+    if (current && current->type == EDIT_RECORD_INSERT && position == current->span.end) {
+        string_concat(&current->text, text);
+        current->span.end = position + text.count;
+    } else {
+        Edit_Record *edit = new Edit_Record();
+        edit->type = EDIT_RECORD_INSERT;
+        edit->span = { position, position + text.count };
+        edit->text = text;
+        edit->prev = current;
+        buffer->edit_history = edit;
+    }
+}
+
+void buffer_record_delete(Buffer *buffer, int64 start, int64 end) {
+    Edit_Record *current = buffer->edit_history;
+    {
+        Edit_Record *edit = new Edit_Record();
+        edit->type = EDIT_RECORD_DELETE;
+        edit->span = { start, end };
+        edit->text = buffer_to_string_span(buffer, {start, end});
+        edit->prev = current;
+        buffer->edit_history = edit;
+    }
+}
+
 COMMAND(self_insert) {
     View *view = active_view;
+    String insert_string = string_copy({active_text_input->text, 1});
     if (active_text_input) {
         if (view->mark_active) {
             String string = { active_text_input->text, 1 };
@@ -90,9 +154,9 @@ COMMAND(self_insert) {
             view_set_cursor(view, get_cursor_from_position(view->buffer, start));
         } else {
             buffer_insert_single(view->buffer, view->cursor.position, active_text_input->text[0]);
+            buffer_record_insert(view->buffer, view->cursor.position, insert_string);
             view_set_cursor(view, get_cursor_from_position(view->buffer, view->cursor.position + 1));
         }
-
         if (view->buffer->post_self_insert_hook) view->buffer->post_self_insert_hook(active_text_input);
     } else {
         assert(false);
@@ -109,7 +173,7 @@ COMMAND(backward_char) {
 
 COMMAND(forward_char) {
     View *view = active_view;
-    if (view->cursor.position < get_buffer_length(view->buffer)) {
+    if (view->cursor.position < buffer_get_length(view->buffer)) {
         Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position + 1);
         view_set_cursor(view, cursor);
     }
@@ -117,7 +181,7 @@ COMMAND(forward_char) {
 
 COMMAND(forward_word) {
     View *view = active_view;
-    int64 buffer_length = get_buffer_length(view->buffer);
+    int64 buffer_length = buffer_get_length(view->buffer);
     char first = buffer_at(view->buffer, view->cursor.position);
     int64 position = view->cursor.position;
     // eat whitespace
@@ -141,7 +205,7 @@ COMMAND(forward_word) {
 
 COMMAND(backward_word) {
     View *view = active_view;
-    int64 buffer_length = get_buffer_length(view->buffer);
+    int64 buffer_length = buffer_get_length(view->buffer);
     char first = buffer_at(view->buffer, view->cursor.position);
     int64 position = view->cursor.position;
     // eat whitespace
@@ -184,7 +248,7 @@ COMMAND(backward_paragraph) {
 
 COMMAND(forward_paragraph) {
     View *view = active_view;
-    for (int64 line = view->cursor.line + 1; line < get_line_count(view->buffer) - 1; line++) {
+    for (int64 line = view->cursor.line + 1; line < buffer_get_line_count(view->buffer) - 1; line++) {
         int64 start = view->buffer->line_starts[line];
         int64 end = view->buffer->line_starts[line + 1];
         bool blank_line = true;
@@ -213,7 +277,7 @@ COMMAND(previous_line) {
 
 COMMAND(next_line) {
     View *view = active_view;
-    if (view->cursor.line < get_line_count(view->buffer) - 1) {
+    if (view->cursor.line < buffer_get_line_count(view->buffer) - 1) {
         int64 position = get_position_from_line(view->buffer, view->cursor.line + 1);
         Cursor cursor = get_cursor_from_position(view->buffer, position);
         view_set_cursor(view, cursor);
@@ -231,6 +295,7 @@ COMMAND(backward_delete_char) {
         }
         view->mark_active = false;
     } else if (view->cursor.position > 0) {
+        buffer_record_delete(view->buffer, view->cursor.position - 1, view->cursor.position);
         buffer_delete_single(view->buffer, view->cursor.position);
         Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position - 1);
         view_set_cursor(view, cursor);
@@ -247,7 +312,8 @@ COMMAND(forward_delete_char) {
             view_set_cursor(view, get_cursor_from_position(view->buffer, start.position));
         }
         view->mark_active = false;
-    } else if (view->cursor.position < get_buffer_length(view->buffer)) {
+    } else if (view->cursor.position < buffer_get_length(view->buffer)) {
+        buffer_record_delete(view->buffer, view->cursor.position, view->cursor.position + 1);
         buffer_delete_single(view->buffer, view->cursor.position + 1);
         Cursor cursor = get_cursor_from_position(view->buffer, view->cursor.position);
         view_set_cursor(view, cursor);
@@ -256,7 +322,7 @@ COMMAND(forward_delete_char) {
 
 COMMAND(backward_delete_word) {
     View *view = active_view;
-    int64 buffer_length = get_buffer_length(view->buffer);
+    int64 buffer_length = buffer_get_length(view->buffer);
     char first = buffer_at(view->buffer, view->cursor.position);
     int64 position = view->cursor.position;
     // eat whitespace
@@ -277,13 +343,14 @@ COMMAND(backward_delete_word) {
 
     position = CLAMP(position, 0, buffer_length);
 
+    buffer_record_delete(view->buffer, position, view->cursor.position);
     buffer_delete_region(view->buffer, position, view->cursor.position);
     view_set_cursor(view, get_cursor_from_position(view->buffer, position));
 }
 
 COMMAND(forward_delete_word) {
     View *view = active_view;
-    int64 buffer_length = get_buffer_length(view->buffer);
+    int64 buffer_length = buffer_get_length(view->buffer);
     char first = buffer_at(view->buffer, view->cursor.position);
     int64 position = view->cursor.position;
     // eat whitespace
@@ -304,8 +371,54 @@ COMMAND(forward_delete_word) {
 
     position = CLAMP(position, 0, buffer_length);
 
+    buffer_record_delete(view->buffer, view->cursor.position, position);
     buffer_delete_region(view->buffer, view->cursor.position, position);
     view_set_cursor(view, get_cursor_from_position(view->buffer, view->cursor.position));
+}
+
+COMMAND(kill_line) {
+    View *view = active_view;
+    int64 start = view->cursor.position;
+    int64 end = start + buffer_get_line_length(view->buffer, view->cursor.line);
+    if (end - start == 0) end += 1;
+    buffer_delete_region(view->buffer, start, end);
+    view_set_cursor(view, view->cursor);
+}
+
+COMMAND(open_line) {
+    View *view = active_view;
+    int64 line_begin = get_position_from_line(view->buffer, view->cursor.line + 1);
+    buffer_insert_single(view->buffer, line_begin, '\n');
+    view_set_cursor(view, get_cursor_from_line(view->buffer, view->cursor.line + 1));
+}
+
+COMMAND(undo) {
+    View *view = active_view;
+    printf("// UNDO //\n");
+    Buffer *buffer = active_view->buffer;
+    for (Edit_Record *edit = buffer->edit_history; edit; edit = edit->prev) {
+        if (edit->type == EDIT_RECORD_INSERT) printf("INSERT ");
+        else if (edit->type == EDIT_RECORD_DELETE) printf("DELETE ");
+        printf("%lld,%lld ", edit->span.start, edit->span.end);
+        printf(": %s\n", edit->text.data);
+    }
+
+    Edit_Record *edit = buffer->edit_history;
+    if (edit) {
+        switch (edit->type) {
+        case EDIT_RECORD_INSERT:
+            buffer_delete_region(buffer, edit->span.start, edit->span.end);
+            view_set_cursor(view, get_cursor_from_position(buffer, edit->span.start));
+            break;
+        case EDIT_RECORD_DELETE:
+            buffer_insert_text(buffer, edit->span.start, edit->text);
+            view_set_cursor(view, get_cursor_from_position(buffer, edit->span.end));
+            break;
+        }
+
+        buffer->edit_history = edit->prev;
+        delete edit;
+    }
 }
 
 // @todo scroll ensure cursor keeps up
@@ -329,7 +442,7 @@ COMMAND(scroll_page_up) {
     int lines_from_top = (int)(cursor_y / view->face->glyph_height);
 
     int64 line = view->cursor.line - lines_from_top;
-    line = CLAMP(line, 0, get_line_count(view->buffer) - 1);
+    line = CLAMP(line, 0, buffer_get_line_count(view->buffer) - 1);
 
     view->y_off = (int)((line - lines_per_page) * view->face->glyph_height);
     view->y_off = view->y_off < 0 ? 0 : view->y_off;
@@ -342,10 +455,10 @@ COMMAND(scroll_page_down) {
 
     int lines_from_bottom = (int)((rect_height(view->rect) - cursor_y) / view->face->glyph_height);
     int64 line = view->cursor.line + lines_from_bottom;
-    line = CLAMP(line, 0, get_line_count(view->buffer) - 1);
+    line = CLAMP(line, 0, buffer_get_line_count(view->buffer) - 1);
 
     view->y_off = (int)(line * view->face->glyph_height);
-    int max_y_off = (int)((get_line_count(view->buffer) - 4) * view->face->glyph_height);
+    int max_y_off = (int)((buffer_get_line_count(view->buffer) - 4) * view->face->glyph_height);
     view->y_off = view->y_off > max_y_off ? max_y_off : view->y_off;
     view_set_cursor(view, get_cursor_from_line(view->buffer, line));
 }
@@ -391,7 +504,7 @@ COMMAND(goto_beginning_of_line) {
 
 COMMAND(goto_end_of_line) {
     View *view = active_view;
-    int64 position = get_position_from_line(view->buffer, view->cursor.line) + get_line_length(view->buffer, view->cursor.line);
+    int64 position = get_position_from_line(view->buffer, view->cursor.line) + buffer_get_line_length(view->buffer, view->cursor.line);
     view_set_cursor(view, get_cursor_from_position(view->buffer, position));
 }
 
@@ -803,14 +916,18 @@ Key_Map *make_default_key_map() {
 
     set_key_command(key_map, KEYMOD_CONTROL|KEY_O, make_key_command("find_file", find_file));
 
-    // Emacs keybindings
-    set_key_command(key_map, KEYMOD_CONTROL | KEY_J, make_key_command("newline", newline));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_Z, make_key_command("undo", undo));
 
+    // Emacs keybindings
     set_key_command(key_map, KEYMOD_CONTROL | KEY_A, make_key_command("goto_beginning_of_line", goto_beginning_of_line));
     set_key_command(key_map, KEYMOD_CONTROL | KEY_E, make_key_command("goto_end_of_line", goto_end_of_line));
 
     set_key_command(key_map, KEYMOD_CONTROL | KEY_SPACE, make_key_command("set_mark", set_mark));
     set_key_command(key_map, KEYMOD_CONTROL | KEY_G, make_key_command("quit_selection", quit_selection));
+
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_K, make_key_command("kill_line", kill_line));
+    set_key_command(key_map, KEYMOD_CONTROL | KEY_J, make_key_command("open_line", open_line));
+
     return key_map;
 }
 
@@ -910,7 +1027,7 @@ int main(int argc, char **argv) {
     find_file_view->buffer = make_buffer("find_file");
     String current_dir = STRZ(path_current_dir());
     buffer_insert_text(find_file_view->buffer, 0, current_dir);
-    find_file_view->cursor = get_cursor_from_position(find_file_view->buffer, get_buffer_length(find_file_view->buffer));
+    find_file_view->cursor = get_cursor_from_position(find_file_view->buffer, buffer_get_length(find_file_view->buffer));
     find_file_view->buffer->post_self_insert_hook = find_file_post_self_insert_hook;
     find_file_view->face = load_font_face("fonts/SegUI.ttf", 20);
     find_file_view->y_off = 0;

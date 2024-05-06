@@ -30,4 +30,10 @@ struct String {
     int64 count;
 };
 
+struct Span {
+    int64 start;
+    int64 end;
+};
+
+
 #define STRZ(String) { (String), (int64)strlen(String) }
