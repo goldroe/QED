@@ -57,6 +57,27 @@ void draw_rectangle(Render_Target *t, Rect rect, v4 color) {
     draw_vertex(t, rect.x1, rect.y0, 0.0f, 0.0f, color);
 }
 
+void draw_glyph(Render_Target *t, Face *face, v2 position, char c, v4 color) {
+    draw__set_texture(t, face->texture);
+    Glyph *glyph = face->glyphs + c;
+    float x0 = position.x + glyph->bl;
+    float x1 = x0 + glyph->bx;
+    float y0 = position.y - glyph->bt + face->ascend;
+    float y1 = y0 + glyph->by; 
+
+    float tw = glyph->bx / (float)face->width;
+    float th = glyph->by / (float)face->height;
+    float tx = glyph->to;
+    float ty = 0.0f;
+
+    draw_vertex(t, x0, y1, tx,      ty + th, color);
+    draw_vertex(t, x0, y0, tx,      ty,      color);
+    draw_vertex(t, x1, y0, tx + tw, ty,      color);
+    draw_vertex(t, x0, y1, tx,      ty + th, color);
+    draw_vertex(t, x1, y0, tx + tw, ty,      color);
+    draw_vertex(t, x1, y1, tx + tw, ty + th, color);
+}
+
 void draw_string(Render_Target *t, Face *face, v2 offset, char *string, int64 count, v4 text_color) {
     draw__set_texture(t, face->texture);
     v2 cursor = V2(0.0f, 0.0f);
@@ -176,6 +197,10 @@ void draw_view(Render_Target *t, View *view) {
     float cy = view->cursor.line * view->face->glyph_height - view->y_off;
     Rect rc = { cx, cy, cx + cw, cy + view->face->glyph_height };
     draw_rectangle(t, rc, theme_color(view->theme, THEME_COLOR_CURSOR));
+
+    char cursor_char = buffer_at(view->buffer, view->cursor.position);
+    if (cursor_char == '\n') cursor_char = ' ';
+    draw_glyph(t, view->face, V2(cx, cy), cursor_char, theme_color(view->theme, THEME_COLOR_CURSOR_CHAR));
 
     free(buffer_string.data);
 }

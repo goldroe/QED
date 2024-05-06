@@ -26,7 +26,8 @@ Face *load_font_face(const char *font_name, int font_height) {
         printf("Font file could not be read\n");
     }
 
-    err = FT_Set_Pixel_Sizes(ft_face, 0, font_height);
+    err = FT_Set_Char_Size(ft_face, 0, font_height * 64, 96, 96);
+    // err = FT_Set_Pixel_Sizes(ft_face, 0, font_height);
     if (err) {
         printf("Error setting pixel sizes of font\n");
     }
