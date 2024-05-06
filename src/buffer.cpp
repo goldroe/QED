@@ -345,3 +345,30 @@ Cursor get_cursor_from_line(Buffer *buffer, int64 line) {
     Cursor cursor = get_cursor_from_position(buffer, position);
     return cursor;
 }
+
+void buffer_record_insert(Buffer *buffer, int64 position, String text) {
+    Edit_Record *current = buffer->edit_history;
+    if (current && current->type == EDIT_RECORD_INSERT && position == current->span.end) {
+        string_concat(&current->text, text);
+        current->span.end = position + text.count;
+    } else {
+        Edit_Record *edit = new Edit_Record();
+        edit->type = EDIT_RECORD_INSERT;
+        edit->span = { position, position + text.count };
+        edit->text = text;
+        edit->prev = current;
+        buffer->edit_history = edit;
+    }
+}
+
+void buffer_record_delete(Buffer *buffer, int64 start, int64 end) {
+    Edit_Record *current = buffer->edit_history;
+    {
+        Edit_Record *edit = new Edit_Record();
+        edit->type = EDIT_RECORD_DELETE;
+        edit->span = { start, end };
+        edit->text = buffer_to_string_span(buffer, {start, end});
+        edit->prev = current;
+        buffer->edit_history = edit;
+    }
+}

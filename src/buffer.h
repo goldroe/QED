@@ -66,3 +66,6 @@ Cursor get_cursor_from_line(Buffer *buffer, int64 line);
 String buffer_to_string(Buffer *buffer);
 String buffer_to_string_apply_line_endings(Buffer *buffer);
 String buffer_to_string_span(Buffer *buffer, Span span);
+
+void buffer_record_insert(Buffer *buffer, int64 position, String text);
+void buffer_record_delete(Buffer *buffer, int64 start, int64 end);
